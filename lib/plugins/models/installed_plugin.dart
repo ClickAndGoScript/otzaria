@@ -1,0 +1,90 @@
+import 'dart:convert';
+import 'package:otzaria/plugins/models/plugin_manifest.dart';
+
+class InstalledPlugin {
+  final String pluginId;
+  final String name;
+  final String version;
+  final String installPath;
+  final String entrypointPath;
+  final String? iconPath;
+  final bool enabled;
+  final bool pinned;
+  final PluginManifest manifest;
+  final DateTime installedAt;
+  final DateTime updatedAt;
+
+  InstalledPlugin({
+    required this.pluginId,
+    required this.name,
+    required this.version,
+    required this.installPath,
+    required this.entrypointPath,
+    this.iconPath,
+    required this.enabled,
+    required this.pinned,
+    required this.manifest,
+    required this.installedAt,
+    required this.updatedAt,
+  });
+
+  factory InstalledPlugin.fromDbMap(Map<String, dynamic> map) {
+    return InstalledPlugin(
+      pluginId: map['plugin_id'] as String,
+      name: map['name'] as String,
+      version: map['version'] as String,
+      installPath: map['install_path'] as String,
+      entrypointPath: map['entrypoint_path'] as String,
+      iconPath: map['icon_path'] as String?,
+      enabled: (map['enabled'] as int) != 0,
+      pinned: (map['pinned'] as int) != 0,
+      manifest: PluginManifest.fromJson(jsonDecode(map['manifest_json'] as String)),
+      installedAt: DateTime.parse(map['installed_at'] as String),
+      updatedAt: DateTime.parse(map['updated_at'] as String),
+    );
+  }
+
+  Map<String, dynamic> toDbMap() {
+    return {
+      'plugin_id': pluginId,
+      'name': name,
+      'version': version,
+      'install_path': installPath,
+      'entrypoint_path': entrypointPath,
+      'icon_path': iconPath,
+      'enabled': enabled ? 1 : 0,
+      'pinned': pinned ? 1 : 0,
+      'manifest_json': jsonEncode(manifest.toJson()),
+      'installed_at': installedAt.toIso8601String(),
+      'updated_at': updatedAt.toIso8601String(),
+    };
+  }
+
+  InstalledPlugin copyWith({
+    String? pluginId,
+    String? name,
+    String? version,
+    String? installPath,
+    String? entrypointPath,
+    String? iconPath,
+    bool? enabled,
+    bool? pinned,
+    PluginManifest? manifest,
+    DateTime? installedAt,
+    DateTime? updatedAt,
+  }) {
+    return InstalledPlugin(
+      pluginId: pluginId ?? this.pluginId,
+      name: name ?? this.name,
+      version: version ?? this.version,
+      installPath: installPath ?? this.installPath,
+      entrypointPath: entrypointPath ?? this.entrypointPath,
+      iconPath: iconPath ?? this.iconPath,
+      enabled: enabled ?? this.enabled,
+      pinned: pinned ?? this.pinned,
+      manifest: manifest ?? this.manifest,
+      installedAt: installedAt ?? this.installedAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+}

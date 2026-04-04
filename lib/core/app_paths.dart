@@ -199,4 +199,44 @@ class AppPaths {
     // Index directory is created by TantivyDataProvider._initEngine().
     // No other directories need pre-creation at startup.
   }
+
+  /// Gets the root path for all plugin data.
+  static Future<String> getPluginsRootPath() async {
+    final Directory baseDir;
+    if (Platform.isAndroid || Platform.isIOS) {
+      baseDir = await getApplicationDocumentsDirectory();
+    } else {
+      baseDir = await getApplicationSupportDirectory();
+    }
+    return p.join(baseDir.path, 'plugins');
+  }
+
+  /// Gets the path where downloaded/extracted plugins are installed.
+  static Future<String> getInstalledPluginsPath() async {
+    final root = await getPluginsRootPath();
+    return p.join(root, 'installed');
+  }
+
+  /// Gets the path for a specific plugin installation.
+  static Future<String> getPluginInstallPath(String pluginId) async {
+    final installed = await getInstalledPluginsPath();
+    return p.join(installed, pluginId, 'current');
+  }
+
+  /// Gets the generic data path for a specific plugin.
+  static Future<String> getPluginDataPath(String pluginId) async {
+    final root = await getPluginsRootPath();
+    return p.join(root, 'data', pluginId);
+  }
+
+  /// Gets the cache path for a specific plugin.
+  static Future<String> getPluginCachePath(String pluginId) async {
+    final root = await getPluginsRootPath();
+    return p.join(root, 'cache', pluginId);
+  }
+
+  /// Resolves the plugin system database path.
+  static Future<String> resolvePluginsDbPath() async {
+    return resolveNotesDbPath('plugins_host.db');
+  }
 }

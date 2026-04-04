@@ -49,6 +49,9 @@ import 'package:otzaria/personal_notes/bloc/personal_notes_bloc.dart';
 import 'package:otzaria/personal_notes/migration/file_to_db_migrator.dart';
 import 'package:otzaria/file_sync/file_sync_bloc.dart';
 import 'package:otzaria/file_sync/file_sync_repository.dart';
+import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
+import 'package:otzaria/plugins/bloc/plugin_system_event.dart';
+import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 
 import 'package:search_engine/search_engine.dart';
 import 'package:otzaria/core/app_paths.dart';
@@ -313,6 +316,11 @@ Future<void> _runAppBootstrap() async {
                     repositoryName: 'SeforimLibrary',
                   ),
                 ),
+              ),
+              BlocProvider<PluginSystemBloc>(
+                create: (context) => PluginSystemBloc(
+                  repository: PluginRegistryRepository(),
+                )..add(LoadPlugins()),
               ),
             ],
             child: const App(),
