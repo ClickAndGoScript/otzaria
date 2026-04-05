@@ -87,6 +87,10 @@ class PluginInstallerService {
       if (_compareVersionsStrict(appVersion, manifest.minAppVersion) < 0) {
         throw Exception('התוסף דורש אוצריא בגרסה ${manifest.minAppVersion} לפחות, אך מותקנת $appVersion');
       }
+      if (manifest.maxAppVersion != null &&
+          _compareVersionsStrict(appVersion, manifest.maxAppVersion!) > 0) {
+        throw Exception('התוסף מיועד לאוצריא עד גרסה ${manifest.maxAppVersion} בלבד, אך מותקנת $appVersion');
+      }
 
       const validPermissions = [
         'app.info.read',
@@ -118,7 +122,11 @@ class PluginInstallerService {
         }
       }
 
-      if (!File(p.join(tempDir.path, manifest.entrypoint)).existsSync()) {
+      final entrypointPath = p.normalize(p.join(tempDir.path, manifest.entrypoint));
+      if (!p.isWithin(tempDir.path, entrypointPath)) {
+        throw Exception('נתיב קובץ הכניסה ${manifest.entrypoint} חורג מגבולות חבילת התוסף');
+      }
+      if (!File(entrypointPath).existsSync()) {
         throw Exception('קובץ הכניסה ${manifest.entrypoint} לא נמצא בחבילה');
       }
 
@@ -165,9 +173,27 @@ class PluginInstallerService {
 
       await _repository.savePlugin(plugin);
 
-      // User confirmed UI prompt, so seed grants for requested permissions safely.
+      // Seed grants: for new installs, grant all. For updates:
+      // - Only grant permissions that did NOT previously have an explicit decision.
+      //   This preserves user revokes across updates.
+      // - Remove grants for permissions that no longer exist in the new manifest.
+      final existingGrants = <String, bool>{};
+      if (existingPlugin != null) {
+        for (final perm in existingPlugin.manifest.permissions) {
+          final granted = await _repository.getPermission(manifest.id, perm);
+          if (granted != null) existingGrants[perm] = granted;
+        }
+        // Clean up grants for permissions removed from the new manifest.
+        for (final oldPerm in existingPlugin.manifest.permissions) {
+          if (!manifest.permissions.contains(oldPerm)) {
+            await _repository.setPermission(manifest.id, oldPerm, false);
+          }
+        }
+      }
       for (final perm in manifest.permissions) {
-         await _repository.setPermission(manifest.id, perm, true);
+        // If user already made a decision on this permission, keep it.
+        if (existingGrants.containsKey(perm)) continue;
+        await _repository.setPermission(manifest.id, perm, true);
       }
 
     } finally {
