@@ -1,0 +1,115 @@
+import 'dart:async';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:otzaria/plugins/models/installed_plugin.dart';
+import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
+import 'package:otzaria/plugins/bridge/plugin_bridge_adapter.dart';
+import 'package:otzaria/plugins/storage/plugin_system_database.dart';
+
+class RateLimiter {
+  int tokens = 50;
+  DateTime lastRefill = DateTime.now();
+
+  bool consume() {
+    final now = DateTime.now();
+    final diff = now.difference(lastRefill).inMilliseconds;
+    tokens += diff ~/ 10;
+    if (tokens > 50) tokens = 50;
+    lastRefill = now;
+    if (tokens > 0) {
+      tokens--;
+      return true;
+    }
+    return false;
+  }
+}
+
+class PluginBridgeHandler {
+  final InstalledPlugin plugin;
+  late final PluginBridgeAdapter adapter;
+  final RateLimiter _rateLimiter = RateLimiter();
+  final PluginRegistryRepository _registry = PluginRegistryRepository();
+
+  PluginBridgeHandler(this.plugin) {
+    adapter = PluginBridgeAdapter(plugin);
+  }
+
+  void register(InAppWebViewController controller) {
+    controller.addJavaScriptHandler(handlerName: 'otzaria_rpc', callback: _handleRpc);
+  }
+
+  Future<dynamic> _handleRpc(List<dynamic> args) async {
+    if (!_rateLimiter.consume()) {
+      return _errorResp("error.rate_limited", "Rate limit exceeded");
+    }
+
+    if (args.isEmpty) return _errorResp("error.invalid_params", "No arguments provided");
+    if (args[0] is! Map) return _errorResp("error.invalid_params", "Invalid argument format");
+
+    final request = args[0] as Map;
+    final method = request['method'] as String?;
+    final payload = request['payload'] as Map<String, dynamic>? ?? {};
+
+    if (method == null || !method.contains('.')) {
+      return _errorResp("error.invalid_params", "Invalid method format");
+    }
+
+    final parts = method.split('.');
+    final domain = parts[0];
+    final action = parts[1];
+
+    try {
+      final requiredPermission = _getRequiredPermission(domain, action);
+      if (requiredPermission != null) {
+        if (!plugin.manifest.permissions.contains(requiredPermission)) {
+           return _errorResp("permission_denied", "Missing permission: $requiredPermission");
+        }
+        final granted = await _registry.getPermission(plugin.pluginId, requiredPermission);
+        if (granted != true) {
+           return _errorResp("permission_denied", "Permission denied: $requiredPermission");
+        }
+      }
+
+      // Execute with timeout
+      final result = await adapter.execute(domain, action, payload).timeout(const Duration(seconds: 30));
+      return _successResp(result);
+
+    } on TimeoutException {
+      PluginSystemDatabase.instance.writeLog(plugin.pluginId, 'ERROR', 'RPC timeout: $domain.$action');
+      return _errorResp("error.timeout", "Request timed out");
+    } catch (e) {
+      PluginSystemDatabase.instance.writeLog(plugin.pluginId, 'ERROR', 'RPC error $domain.$action: $e');
+      return _errorResp("error.internal", e.toString());
+    }
+  }
+
+  String? _getRequiredPermission(String domain, String action) {
+    switch (domain) {
+      case 'app': return 'app.info.read';
+      case 'library':
+        if (action == 'getBookContent' || action == 'getBookToc') return 'library.content.read';
+        return 'library.books.read';
+      case 'search': return 'search.fulltext.read';
+      case 'reader': return 'reader.open';
+      case 'navigation': return 'navigation.write';
+      case 'notes': 
+        if (action == 'add' || action == 'update' || action == 'delete') return 'notes.write';
+        return 'notes.read';
+      case 'ui': return 'ui.feedback';
+      case 'storage':
+        if (action == 'get' || action == 'list') return 'plugin.storage.read';
+        return 'plugin.storage.write';
+      case 'settings': return 'settings.read';
+      case 'calendar': return 'calendar.read';
+      case 'publishedData': return 'published_data.write';
+      default: return null;
+    }
+  }
+
+  Map<String, dynamic> _successResp(dynamic data) {
+    return {'success': true, 'data': data};
+  }
+
+  Map<String, dynamic> _errorResp(String code, String message) {
+    return {'success': false, 'error': {'code': code, 'message': message}};
+  }
+}

@@ -1,0 +1,43 @@
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
+
+class PluginRuntimeDispatcher {
+  static final PluginRuntimeDispatcher instance = PluginRuntimeDispatcher._();
+  PluginRuntimeDispatcher._();
+
+  final Map<String, InAppWebViewController> _controllers = {};
+  final PluginRegistryRepository _repository = PluginRegistryRepository();
+  
+  void registerController(String pluginId, InAppWebViewController controller) {
+    _controllers[pluginId] = controller;
+  }
+  
+  void unregisterController(String pluginId) {
+    _controllers.remove(pluginId);
+  }
+
+  Future<void> dispatchEvent(String topic, Map<String, dynamic> payload) async {
+    final jsonPayload = jsonEncode(payload);
+    debugPrint('PluginRuntimeDispatcher: Dispatching $topic');
+
+    for (final entry in _controllers.entries) {
+      final pluginId = entry.key;
+      final controller = entry.value;
+
+      try {
+        // בדוק שהתוסף מופעל לפני שליחת event
+        final isEnabled = await _repository.getIsEnabled(pluginId);
+        if (isEnabled == false) continue;
+
+        final granted = await _repository.getPermission(pluginId, 'events.subscribe:$topic');
+        if (granted == true) {
+          await controller.evaluateJavascript(source: "window.dispatchEvent(new CustomEvent('$topic', { detail: $jsonPayload }));");
+        }
+      } catch (e) {
+        debugPrint('Failed to dispatch $topic to plugin $pluginId: $e');
+      }
+    }
+  }
+}

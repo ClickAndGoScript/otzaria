@@ -9,6 +9,7 @@ import 'package:kosher_dart/kosher_dart.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 import 'package:otzaria/tools/calendar/services/notification_service.dart';
 import 'package:otzaria/tools/calendar/services/google_calendar_service.dart';
+import 'package:otzaria/plugins/adapters/plugin_calendar_adapter.dart';
 import 'package:otzaria/tools/shamor_zachor/utils/message_utils.dart';
 import 'package:timezone/timezone.dart' as tz;
 
@@ -312,6 +313,9 @@ class CalendarCubit extends Cubit<CalendarState> {
       events = [];
     }
 
+    // Add plugin published events via adapter
+    events = await PluginCalendarAdapter().loadAndMergePluginEvents(events);
+
     emit(state.copyWith(
       calendarType: calendarType,
       selectedCity: selectedCity,
@@ -336,6 +340,31 @@ class CalendarCubit extends Cubit<CalendarState> {
     if (googleCalendarEnabled) {
       await syncGoogleCalendar(interactive: false);
     }
+  }
+
+  /// מרענן אירועי plugin בזמן אמת.
+  ///
+  /// מסיר מה-state את כל האירועים שנוצרו על-ידי plugin
+  /// (id בפורמט `pluginId:key`) ומוסיף מחדש את כל ה-records
+  /// מה-DB לאחר upsert / remove.
+  ///
+  /// [currentWorkspaceId] / [currentBookId] — לסינון workspace/book scope.
+  Future<void> refreshPluginEvents({
+    String? currentWorkspaceId,
+    String? currentBookId,
+  }) async {
+    // שמור אירועי משתמש בלבד (id ללא ':' הם אירועי משתמש)
+    final userEvents = state.events
+        .where((e) => !e.id.contains(':'))
+        .toList();
+
+    final merged = await PluginCalendarAdapter().loadAndMergePluginEvents(
+      userEvents,
+      currentWorkspaceId: currentWorkspaceId,
+      currentBookId: currentBookId,
+    );
+
+    emit(state.copyWith(events: merged));
   }
 
   static Map<String, ZmanAlertPreference> _parseZmanAlertPreferences(

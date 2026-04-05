@@ -41,6 +41,14 @@ import 'package:otzaria/history/bloc/history_event.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 import 'package:otzaria/file_sync/file_sync_bloc.dart';
 import 'package:otzaria/file_sync/file_sync_event.dart';
+import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
+import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
+import 'package:otzaria/tabs/bloc/tabs_state.dart';
+import 'package:otzaria/tabs/models/text_tab.dart';
+import 'package:otzaria/tabs/models/pdf_tab.dart';
+import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
+import 'package:otzaria/plugins/bloc/plugin_system_state.dart';
+import 'package:otzaria/plugins/bridge/plugin_bridge_adapter.dart' show buildThemePayload;
 
 class MainWindowScreen extends StatefulWidget {
   const MainWindowScreen({super.key});
@@ -82,6 +90,10 @@ class MainWindowScreenState extends State<MainWindowScreen>
   bool _hasCheckedAutoIndex = false;
   bool _hasRestoredFullscreen = false;
   bool _hasStartedFileSync = false;
+  // עוקב אחר מצב ההגדרות הקודם לצורך dispatch ספציפי
+  SettingsState? _prevSettingsState;
+  // עוקב אחר מצב הלוח הקודם לצורך dispatch ספציפי
+  CalendarState? _prevCalendarState;
 
   @override
   void initState() {
@@ -98,10 +110,30 @@ class MainWindowScreenState extends State<MainWindowScreen>
     // הצגת פופאפ פרסומת אחרי 5 שניות
     WidgetsBinding.instance.addPostFrameCallback((_) {
       AdPopupDialog.showIfNeeded(context);
+
+      // רענון plugin calendar events עם scope אמיתי לאחר שה-context מוכן.
+      // הטעינה הראשונית ב-_initializeCalendar נקראה בלי workspace/book IDs —
+      // כאן אנחנו מתקנים זאת עם ה-state שמזומן כעת.
+      if (!mounted) return;
+      try {
+        final workspaceId = context.read<WorkspaceBloc>().state.activeWorkspaceId;
+        final bookId = context.read<TabsBloc>().state.currentTab?.title;
+        _calendarCubit.refreshPluginEvents(
+          currentWorkspaceId: workspaceId,
+          currentBookId: bookId,
+        );
+      } catch (_) {}
     });
 
     // Setup fullscreen sync with window manager
     _setupFullscreenSync();
+
+    // Listen to calendar changes for plugin dispatch
+    _calendarCubit.stream.listen((state) {
+       PluginRuntimeDispatcher.instance.dispatchEvent('calendar.date_changed', {
+          'date': state.selectedGregorianDate.toIso8601String(),
+       });
+    });
 
     // NOTE: Background sync is now triggered by LibraryBloc listener
     // (see MultiBlocListener) to avoid DB lock contention during library loading.
@@ -387,13 +419,21 @@ class MainWindowScreenState extends State<MainWindowScreen>
         BlocListener<NavigationBloc, NavigationState>(
           listenWhen: (previous, current) =>
               previous.currentScreen != current.currentScreen,
-          listener: _handleNavigationChange,
+          listener: (context, state) {
+            PluginRuntimeDispatcher.instance.dispatchEvent('navigation.changed', {
+              'screen': state.currentScreen.name,
+            });
+            _handleNavigationChange(context, state);
+          },
         ),
         BlocListener<WorkspaceBloc, WorkspaceState>(
           listenWhen: (previous, current) =>
               previous.activeWorkspaceId != current.activeWorkspaceId ||
               (previous.isLoading && !current.isLoading),
           listener: (context, state) {
+            PluginRuntimeDispatcher.instance.dispatchEvent('workspace.changed', {
+              'workspaceId': state.activeWorkspaceId,
+            });
             // עדכון שם שולחן העבודה הנוכחי ב-HistoryBloc
             final currentId = state.activeWorkspaceId;
             if (currentId != null) {
@@ -428,24 +468,181 @@ class MainWindowScreenState extends State<MainWindowScreen>
         ),
         BlocListener<SettingsBloc, SettingsState>(
           listenWhen: (previous, current) {
-            // Trigger when settings are loaded for the first time (not initial state anymore)
-            // or when autoUpdateIndex changes
-            final isInitialLoad = previous == SettingsState.initial() &&
-                current != SettingsState.initial();
-            final hasChanged =
-                previous.autoUpdateIndex != current.autoUpdateIndex;
-            return isInitialLoad || hasChanged;
+            // fire on first load or any change to plugin-visible settings
+            if (previous == SettingsState.initial() && current != SettingsState.initial()) return true;
+            return previous.isDarkMode != current.isDarkMode
+                || previous.followSystemTheme != current.followSystemTheme
+                || previous.seedColor != current.seedColor
+                || previous.darkSeedColor != current.darkSeedColor
+                || previous.fontSize != current.fontSize
+                || previous.fontFamily != current.fontFamily
+                || previous.commentatorsFontFamily != current.commentatorsFontFamily
+                || previous.commentatorsFontSize != current.commentatorsFontSize
+                || previous.lineHeight != current.lineHeight
+                || previous.autoUpdateIndex != current.autoUpdateIndex
+                || previous.showTeamim != current.showTeamim
+                || previous.defaultRemoveNikud != current.defaultRemoveNikud
+                || previous.removeNikudFromTanach != current.removeNikudFromTanach
+                || previous.replaceHolyNames != current.replaceHolyNames
+                || previous.libraryViewMode != current.libraryViewMode
+                || previous.alignTabsToRight != current.alignTabsToRight
+                || previous.copyWithHeaders != current.copyWithHeaders
+                || previous.copyHeaderFormat != current.copyHeaderFormat;
           },
-          listener: (context, state) {
-            // When settings are loaded for the first time, check if we should start indexing
+          listener: (context, current) {
+            final previous = _prevSettingsState ?? SettingsState.initial();
+            _prevSettingsState = current;
+
+            // --- settings.changed: one event per changed key (allowlist only) ---
+            void dispatch(String key, dynamic value) {
+              PluginRuntimeDispatcher.instance.dispatchEvent(
+                  'settings.changed', {'key': key, 'newValue': value});
+            }
+
+            if (previous.isDarkMode != current.isDarkMode) {
+              dispatch(SettingsRepository.keyDarkMode, current.isDarkMode);
+            }
+            if (previous.followSystemTheme != current.followSystemTheme) {
+              dispatch(SettingsRepository.keyFollowSystemTheme, current.followSystemTheme);
+            }
+            if (previous.seedColor != current.seedColor) {
+              dispatch(SettingsRepository.keySwatchColor, current.seedColor.toARGB32().toRadixString(16));
+            }
+            if (previous.darkSeedColor != current.darkSeedColor) {
+              dispatch(SettingsRepository.keyDarkSwatchColor, current.darkSeedColor.toARGB32().toRadixString(16));
+            }
+            if (previous.fontSize != current.fontSize) {
+              dispatch(SettingsRepository.keyFontSize, current.fontSize);
+            }
+            if (previous.fontFamily != current.fontFamily) {
+              dispatch(SettingsRepository.keyFontFamily, current.fontFamily);
+            }
+            if (previous.commentatorsFontFamily != current.commentatorsFontFamily) {
+              dispatch(SettingsRepository.keyCommentatorsFontFamily, current.commentatorsFontFamily);
+            }
+            if (previous.commentatorsFontSize != current.commentatorsFontSize) {
+              dispatch(SettingsRepository.keyCommentatorsFontSize, current.commentatorsFontSize);
+            }
+            if (previous.lineHeight != current.lineHeight) {
+              dispatch(SettingsRepository.keyLineHeight, current.lineHeight);
+            }
+            if (previous.showTeamim != current.showTeamim) {
+              dispatch(SettingsRepository.keyShowTeamim, current.showTeamim);
+            }
+            if (previous.defaultRemoveNikud != current.defaultRemoveNikud) {
+              dispatch(SettingsRepository.keyDefaultNikud, current.defaultRemoveNikud);
+            }
+            if (previous.removeNikudFromTanach != current.removeNikudFromTanach) {
+              dispatch(SettingsRepository.keyRemoveNikudFromTanach, current.removeNikudFromTanach);
+            }
+            if (previous.replaceHolyNames != current.replaceHolyNames) {
+              dispatch(SettingsRepository.keyReplaceHolyNames, current.replaceHolyNames);
+            }
+            if (previous.libraryViewMode != current.libraryViewMode) {
+              dispatch(SettingsRepository.keyLibraryViewMode, current.libraryViewMode);
+            }
+            if (previous.alignTabsToRight != current.alignTabsToRight) {
+              dispatch(SettingsRepository.keyAlignTabsToRight, current.alignTabsToRight);
+            }
+            if (previous.copyWithHeaders != current.copyWithHeaders) {
+              dispatch(SettingsRepository.keyCopyWithHeaders, current.copyWithHeaders);
+            }
+            if (previous.copyHeaderFormat != current.copyHeaderFormat) {
+              dispatch(SettingsRepository.keyCopyHeaderFormat, current.copyHeaderFormat);
+            }
+
+            // --- theme.changed: only when visual theme changes ---
+            final isThemeChange = previous.isDarkMode != current.isDarkMode
+                || previous.followSystemTheme != current.followSystemTheme
+                || previous.seedColor != current.seedColor
+                || previous.darkSeedColor != current.darkSeedColor
+                || previous.fontSize != current.fontSize
+                || previous.fontFamily != current.fontFamily
+                || previous.lineHeight != current.lineHeight
+                || previous.commentatorsFontFamily != current.commentatorsFontFamily
+                || previous.commentatorsFontSize != current.commentatorsFontSize;
+            if (isThemeChange) {
+              final themePayload = buildThemePayload(context);
+              PluginRuntimeDispatcher.instance.dispatchEvent('theme.changed', themePayload);
+            }
+
+            // --- internal app logic ---
             _checkAndStartIndexing(context);
             _startupWorkGate.markIndexingDecisionResolved(
-              expectIndexing: state.autoUpdateIndex,
+              expectIndexing: current.autoUpdateIndex,
             );
             _tryStartDeferredStartupWork();
-            // Also restore fullscreen state
             _restoreFullscreenState(context);
           },
+        ),
+        BlocListener<TabsBloc, TabsState>(
+          listenWhen: (previous, current) => previous.currentTab != current.currentTab,
+          listener: (context, state) {
+            final currentTab = state.currentTab;
+            if (currentTab != null) {
+              int tabIndex = 0;
+              if (currentTab is TextBookTab) tabIndex = currentTab.index;
+              if (currentTab is PdfBookTab) tabIndex = currentTab.pageNumber;
+              PluginRuntimeDispatcher.instance.dispatchEvent('reader.current_book_changed', {
+                'book': currentTab.title,
+                'index': tabIndex,
+              });
+            }
+          },
+        ),
+        // settings.changed עבור selectedCity ו-calendarType —
+        // שדות אלה נמצאים ב-CalendarState ולא ב-SettingsState
+        BlocListener<CalendarCubit, CalendarState>(
+          listenWhen: (previous, current) =>
+              previous.selectedCity != current.selectedCity ||
+              previous.calendarType != current.calendarType,
+          listener: (context, current) {
+            final previous = _prevCalendarState;
+            _prevCalendarState = current;
+            if (previous == null) return;
+            if (previous.selectedCity != current.selectedCity) {
+              PluginRuntimeDispatcher.instance.dispatchEvent('settings.changed', {
+                'key': SettingsRepository.keySelectedCity,
+                'newValue': current.selectedCity,
+              });
+            }
+            if (previous.calendarType != current.calendarType) {
+              PluginRuntimeDispatcher.instance.dispatchEvent('settings.changed', {
+                'key': SettingsRepository.keyCalendarType,
+                'newValue': current.calendarType.toString(),
+              });
+            }
+          },
+        ),
+        // רענון לוח כשמשתנה הספר הפתוח (book-scope events)
+        BlocListener<TabsBloc, TabsState>(
+          listenWhen: (previous, current) =>
+              previous.currentTab?.title != current.currentTab?.title,
+          listener: (context, state) {
+            final bookId = state.currentTab?.title;
+            final workspaceId = context.read<WorkspaceBloc>().state.activeWorkspaceId;
+            _calendarCubit.refreshPluginEvents(
+              currentBookId: bookId,
+              currentWorkspaceId: workspaceId,
+            );
+          },
+        ),
+        // רענון לוח כשמשתנה ה-workspace (workspace-scope events)
+        BlocListener<WorkspaceBloc, WorkspaceState>(
+          listenWhen: (previous, current) =>
+              previous.activeWorkspaceId != current.activeWorkspaceId,
+          listener: (context, state) {
+            final workspaceId = state.activeWorkspaceId;
+            final bookId = context.read<TabsBloc>().state.currentTab?.title;
+            _calendarCubit.refreshPluginEvents(
+              currentWorkspaceId: workspaceId,
+              currentBookId: bookId,
+            );
+          },
+        ),
+        BlocListener<PluginSystemBloc, PluginSystemState>(
+          listenWhen: (previous, current) => false, // Only interested in permission changed, wait, plugin system state doesn't track this perfectly yet.
+          listener: (context, state) {},
         ),
       ],
       child: BlocProvider.value(

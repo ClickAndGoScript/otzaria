@@ -18,6 +18,23 @@ class InstallPluginRequested extends PluginSystemEvent {
   List<Object?> get props => [archivePath, forceOverwrite];
 }
 
+class ConfirmPluginInstall extends PluginSystemEvent {
+  final String tempDirPath;
+  final dynamic manifest; // Passed as dynamic here or use PluginManifest
+  const ConfirmPluginInstall(this.tempDirPath, this.manifest);
+
+  @override
+  List<Object?> get props => [tempDirPath, manifest];
+}
+
+class CancelPluginInstall extends PluginSystemEvent {
+  final String tempDirPath;
+  const CancelPluginInstall(this.tempDirPath);
+
+  @override
+  List<Object?> get props => [tempDirPath];
+}
+
 class UninstallPluginRequested extends PluginSystemEvent {
   final String pluginId;
   const UninstallPluginRequested(this.pluginId);
@@ -40,6 +57,21 @@ class DisablePluginRequested extends PluginSystemEvent {
 
   @override
   List<Object?> get props => [pluginId];
+}
+
+class SetPluginPermissionRequested extends PluginSystemEvent {
+  final String pluginId;
+  final String permission;
+  final bool granted;
+
+  const SetPluginPermissionRequested({
+    required this.pluginId,
+    required this.permission,
+    required this.granted,
+  });
+
+  @override
+  List<Object?> get props => [pluginId, permission, granted];
 }
 
 class PinPluginRequested extends PluginSystemEvent {

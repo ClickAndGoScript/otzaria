@@ -324,6 +324,25 @@ class MoreScreenState extends State<MoreScreen>
               context.read<PluginSystemBloc>().add(LoadPlugins());
             }
           });
+        } else if (state is PluginSystemInstallRequiresPermissions) {
+          final permList = state.manifest.permissions.isEmpty 
+              ? 'אין הרשאות מיוחדות נדרשות'
+              : state.manifest.permissions.join('\n');
+          showWarningDialog(
+            context: context,
+            title: 'אישור התקנת תוסף',
+            content: 'התוסף "${state.manifest.name}" מבקש גישה למשאבי מערכת.\n\nהרשאות נדרשות:\n$permList',
+            subtitle: 'האם ברצונך לאשר הרשאות אלו ולהתקין את התוסף?',
+            cancelText: 'ביטול',
+            confirmText: 'התקן וקבל',
+          ).then((value) {
+            if (!context.mounted) return;
+            if (value == true) {
+              context.read<PluginSystemBloc>().add(ConfirmPluginInstall(state.tempDirPath, state.manifest));
+            } else {
+              context.read<PluginSystemBloc>().add(CancelPluginInstall(state.tempDirPath));
+            }
+          });
         }
       },
       child: Scaffold(

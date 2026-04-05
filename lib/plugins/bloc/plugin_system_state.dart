@@ -1,5 +1,6 @@
 import 'package:equatable/equatable.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
+import 'package:otzaria/plugins/models/plugin_manifest.dart';
 
 sealed class PluginSystemState extends Equatable {
   const PluginSystemState();
@@ -20,7 +21,8 @@ class PluginSystemLoaded extends PluginSystemState {
   @override
   List<Object?> get props => [plugins];
   
-  List<InstalledPlugin> get pinnedPlugins => plugins.where((p) => p.pinned).toList();
+  List<InstalledPlugin> get activePlugins => plugins.where((p) => p.enabled).toList();
+  List<InstalledPlugin> get pinnedPlugins => plugins.where((p) => p.pinned && p.enabled).toList();
 }
 
 class PluginSystemError extends PluginSystemState {
@@ -45,4 +47,17 @@ class PluginSystemOverwriteRequired extends PluginSystemState {
 
   @override
   List<Object?> get props => [archivePath, pluginName, version];
+}
+
+class PluginSystemInstallRequiresPermissions extends PluginSystemState {
+  final PluginManifest manifest;
+  final String tempDirPath;
+
+  const PluginSystemInstallRequiresPermissions({
+    required this.manifest,
+    required this.tempDirPath,
+  });
+
+  @override
+  List<Object?> get props => [manifest, tempDirPath];
 }

@@ -14,10 +14,18 @@ class PluginOverwriteException implements Exception {
   PluginOverwriteException(this.pluginName, this.version);
 }
 
+class PreparedInstall {
+  final PluginManifest manifest;
+  final String tempDirPath;
+  final bool isOverwrite;
+  
+  PreparedInstall(this.manifest, this.tempDirPath, this.isOverwrite);
+}
+
 class PluginInstallerService {
   final PluginRegistryRepository _repository = PluginRegistryRepository();
 
-  Future<void> installPlugin(String archivePath, {bool forceOverwrite = false}) async {
+  Future<PreparedInstall> prepareInstall(String archivePath, {bool forceOverwrite = false}) async {
     final tempDir = await Directory.systemTemp.createTemp('otz_plugin_');
     try {
       // 1. Extract zip to temp
@@ -62,6 +70,7 @@ class PluginInstallerService {
          throw Exception('גרסת התוסף במניפסט אינה חוקית. נדרש פורמט SemVer חוקיות (לדוגמה 1.0.0).');
       }
 
+      bool isOverwrite = false;
       final existingPlugin = await _repository.getPlugin(manifest.id);
       if (existingPlugin != null) {
          final diff = _compareVersionsStrict(manifest.version, existingPlugin.version);
@@ -70,6 +79,7 @@ class PluginInstallerService {
          } else if (diff == 0 && !forceOverwrite) {
            throw PluginOverwriteException(manifest.name, manifest.version);
          }
+         isOverwrite = true;
       }
 
       final packageInfo = await PackageInfo.fromPlatform();
@@ -79,11 +89,28 @@ class PluginInstallerService {
       }
 
       const validPermissions = [
-        'database.read',
-        'storage.kv',
-        'network.request',
-        'ui.notify',
-        'theme.current',
+        'app.info.read',
+        'library.books.read',
+        'library.content.read',
+        'search.fulltext.read',
+        'reader.open',
+        'navigation.write',
+        'notes.read',
+        'notes.write',
+        'calendar.read',
+        'settings.read',
+        'ui.feedback',
+        'plugin.storage.read',
+        'plugin.storage.write',
+        'published_data.write',
+        'network.access',
+        'events.subscribe:navigation.changed',
+        'events.subscribe:reader.current_book_changed',
+        'events.subscribe:theme.changed',
+        'events.subscribe:settings.changed',
+        'events.subscribe:calendar.date_changed',
+        'events.subscribe:workspace.changed',
+        'events.subscribe:plugin.permissions_changed'
       ];
       for (final perm in manifest.permissions) {
         if (!validPermissions.contains(perm)) {
@@ -94,6 +121,21 @@ class PluginInstallerService {
       if (!File(p.join(tempDir.path, manifest.entrypoint)).existsSync()) {
         throw Exception('קובץ הכניסה ${manifest.entrypoint} לא נמצא בחבילה');
       }
+
+      return PreparedInstall(manifest, tempDir.path, isOverwrite);
+
+    } catch (e) {
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> finalizeInstall(String tempDirPath, PluginManifest manifest) async {
+    final tempDir = Directory(tempDirPath);
+    try {
+      final existingPlugin = await _repository.getPlugin(manifest.id);
 
       // 3. Move to install path
       final installPath = await AppPaths.getPluginInstallPath(manifest.id);
@@ -123,10 +165,22 @@ class PluginInstallerService {
 
       await _repository.savePlugin(plugin);
 
+      // User confirmed UI prompt, so seed grants for requested permissions safely.
+      for (final perm in manifest.permissions) {
+         await _repository.setPermission(manifest.id, perm, true);
+      }
+
     } finally {
       if (await tempDir.exists()) {
         await tempDir.delete(recursive: true);
       }
+    }
+  }
+
+  Future<void> cancelInstall(String tempDirPath) async {
+    final tempDir = Directory(tempDirPath);
+    if (await tempDir.exists()) {
+      await tempDir.delete(recursive: true);
     }
   }
 

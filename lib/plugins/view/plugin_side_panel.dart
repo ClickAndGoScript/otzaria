@@ -6,6 +6,7 @@ import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_event.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_state.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
+import 'package:otzaria/plugins/view/plugin_settings_screen.dart';
 
 class PluginSidePanel extends StatelessWidget {
   final Function(InstalledPlugin)? onPluginSelected;
@@ -86,19 +87,34 @@ class PluginSidePanel extends StatelessWidget {
                         leading: const Icon(FluentIcons.puzzle_piece_24_regular),
                         title: Text(plugin.name, maxLines: 1, overflow: TextOverflow.ellipsis),
                         subtitle: Text(plugin.version),
-                        trailing: IconButton(
-                          icon: Icon(
-                            plugin.pinned
-                                ? FluentIcons.pin_24_filled
-                                : FluentIcons.pin_24_regular,
-                          ),
-                          onPressed: () {
-                            if (plugin.pinned) {
-                              context.read<PluginSystemBloc>().add(UnpinPluginRequested(plugin.pluginId));
-                            } else {
-                              context.read<PluginSystemBloc>().add(PinPluginRequested(plugin.pluginId));
-                            }
-                          },
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(FluentIcons.settings_24_regular),
+                              tooltip: 'הגדרות תוסף',
+                              onPressed: () {
+                                Navigator.of(context).push(MaterialPageRoute(
+                                  builder: (context) => PluginSettingsScreen(plugin: plugin),
+                                ));
+                              },
+                            ),
+                            IconButton(
+                              icon: Icon(
+                                plugin.pinned
+                                    ? FluentIcons.pin_24_filled
+                                    : FluentIcons.pin_24_regular,
+                              ),
+                              tooltip: plugin.pinned ? 'בטל הצמדה' : 'הצמד לסרגל',
+                              onPressed: () {
+                                if (plugin.pinned) {
+                                  context.read<PluginSystemBloc>().add(UnpinPluginRequested(plugin.pluginId));
+                                } else {
+                                  context.read<PluginSystemBloc>().add(PinPluginRequested(plugin.pluginId));
+                                }
+                              },
+                            ),
+                          ],
                         ),
                         onTap: () {
                           if (onPluginSelected != null) {
