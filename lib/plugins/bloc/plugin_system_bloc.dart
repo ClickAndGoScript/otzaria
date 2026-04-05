@@ -4,17 +4,27 @@ import 'package:otzaria/plugins/bloc/plugin_system_state.dart';
 import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:otzaria/plugins/services/plugin_installer_service.dart';
 import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
+import 'package:otzaria/plugins/services/plugin_dev_loader_service.dart';
+import 'package:otzaria/plugins/services/plugin_dev_watch_service.dart';
+import 'dart:async';
 import 'package:otzaria/core/ui_snack.dart';
 
 class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
   final PluginRegistryRepository repository;
   final PluginInstallerService _installerService;
+  final PluginDevLoaderService devLoader;
+  final PluginDevWatchService devWatchService;
+  StreamSubscription<PluginDevFsChange>? _devWatchSub;
 
   PluginSystemBloc({
     required this.repository,
     PluginInstallerService? installerService,
+    PluginDevLoaderService? devLoader,
+    PluginDevWatchService? devWatchService,
   })  : _installerService =
             installerService ?? PluginInstallerService(repository: repository),
+        devLoader = devLoader ?? PluginDevLoaderService(repository: repository),
+        devWatchService = devWatchService ?? PluginDevWatchService(),
         super(PluginSystemInitial()) {
     on<LoadPlugins>(_onLoadPlugins);
     on<InstallPluginRequested>(_onInstallPluginRequested);
@@ -27,6 +37,25 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     on<DisablePluginRequested>(_onDisablePluginRequested);
     on<SetPluginPermissionRequested>(_onSetPluginPermissionRequested);
     on<RefreshPlugins>((event, emit) => add(LoadPlugins()));
+    on<LoadDevelopmentPluginRequested>(_onLoadDevelopmentPluginRequested);
+    on<DetachDevelopmentPluginRequested>(_onDetachDevelopmentPluginRequested);
+    on<ReloadDevelopmentPluginRequested>(_onReloadDevelopmentPluginRequested);
+    on<DevelopmentPluginManifestChanged>(_onDevelopmentPluginManifestChanged);
+
+    _devWatchSub = this.devWatchService.events.listen((change) {
+      if (change.manifestChanged) {
+        add(DevelopmentPluginManifestChanged(change.pluginId));
+      } else {
+        PluginRuntimeDispatcher.instance.reloadPlugin(change.pluginId);
+      }
+    });
+  }
+
+  @override
+  Future<void> close() {
+    _devWatchSub?.cancel();
+    devWatchService.dispose();
+    return super.close();
   }
 
   Future<void> _onLoadPlugins(
@@ -34,6 +63,7 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     emit(PluginSystemLoading());
     try {
       final plugins = await repository.getAllPlugins();
+      devWatchService.syncWatchers(await repository.getDevelopmentPlugins());
       emit(PluginSystemLoaded(plugins));
     } catch (e) {
       emit(PluginSystemError(e.toString()));
@@ -158,6 +188,47 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
       add(LoadPlugins());
     } catch (e) {
       UiSnack.showError('שגיאה בעדכון הרשאה: ${e.toString()}');
+    }
+  }
+
+  Future<void> _onLoadDevelopmentPluginRequested(
+      LoadDevelopmentPluginRequested event, Emitter<PluginSystemState> emit) async {
+    try {
+      await devLoader.loadDevelopmentPlugin(event.directoryPath);
+      add(LoadPlugins());
+      UiSnack.showSuccess('תוסף פיתוח נטען בהצלחה');
+    } catch (e) {
+      UiSnack.showError('שגיאה בטעינת תוסף פתוח: ${e.toString()}');
+    }
+  }
+
+  Future<void> _onDetachDevelopmentPluginRequested(
+      DetachDevelopmentPluginRequested event, Emitter<PluginSystemState> emit) async {
+    try {
+      await repository.detachDevelopmentPlugin(event.pluginId);
+      devWatchService.stopWatcher(event.pluginId);
+      add(LoadPlugins());
+    } catch (e) {
+      UiSnack.showError('שגיאה בניתוק התוסף: ${e.toString()}');
+    }
+  }
+
+  Future<void> _onReloadDevelopmentPluginRequested(
+      ReloadDevelopmentPluginRequested event, Emitter<PluginSystemState> emit) async {
+    PluginRuntimeDispatcher.instance.reloadPlugin(event.pluginId);
+  }
+
+  Future<void> _onDevelopmentPluginManifestChanged(
+      DevelopmentPluginManifestChanged event, Emitter<PluginSystemState> emit) async {
+    try {
+      final plugin = await repository.getPlugin(event.pluginId);
+      if (plugin != null && plugin.isDevelopment && plugin.devRootPath != null) {
+        await devLoader.loadDevelopmentPlugin(plugin.devRootPath!);
+        add(LoadPlugins());
+        PluginRuntimeDispatcher.instance.reloadPlugin(event.pluginId);
+      }
+    } catch (e) {
+      PluginRuntimeDispatcher.instance.reloadPlugin(event.pluginId);
     }
   }
 }

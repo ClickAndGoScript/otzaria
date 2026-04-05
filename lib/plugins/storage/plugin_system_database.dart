@@ -4,9 +4,10 @@ import 'package:otzaria/plugins/models/installed_plugin.dart';
 import 'package:otzaria/plugins/models/plugin_permission_grant.dart';
 import 'package:otzaria/plugins/models/plugin_published_record.dart';
 import 'package:otzaria/migration/dao/sqflite/sqlite3_utils.dart';
+import 'package:flutter/foundation.dart';
 
 class PluginSystemDatabase {
-  static const _databaseVersion = 1;
+  static const _databaseVersion = 2;
 
   PluginSystemDatabase._();
   static final PluginSystemDatabase instance = PluginSystemDatabase._();
@@ -28,12 +29,27 @@ class PluginSystemDatabase {
   }
 
   void _migrateSchema(Database db) {
-    final currentVersion =
+    var currentVersion =
         db.select('PRAGMA user_version').first.values.first as int;
     if (currentVersion == 0) {
       _createSchemaV1(db);
+      currentVersion = 1;
+    }
+    if (currentVersion < 2) {
+      _migrateToV2(db);
+      currentVersion = 2;
     }
     db.execute('PRAGMA user_version = $_databaseVersion');
+  }
+
+  @visibleForTesting
+  void migrateSchemaForTest(Database db) {
+    _migrateSchema(db);
+  }
+
+  void _migrateToV2(Database db) {
+    db.execute('ALTER TABLE plugin_installation ADD COLUMN source_type TEXT NOT NULL DEFAULT "packaged"');
+    db.execute('ALTER TABLE plugin_installation ADD COLUMN dev_root_path TEXT');
   }
 
   void _createSchemaV1(Database db) {

@@ -92,3 +92,35 @@ class UnpinPluginRequested extends PluginSystemEvent {
 }
 
 class RefreshPlugins extends PluginSystemEvent {}
+
+class LoadDevelopmentPluginRequested extends PluginSystemEvent {
+  final String directoryPath;
+  const LoadDevelopmentPluginRequested(this.directoryPath);
+
+  @override
+  List<Object?> get props => [directoryPath];
+}
+
+class DetachDevelopmentPluginRequested extends PluginSystemEvent {
+  final String pluginId;
+  const DetachDevelopmentPluginRequested(this.pluginId);
+
+  @override
+  List<Object?> get props => [pluginId];
+}
+
+class ReloadDevelopmentPluginRequested extends PluginSystemEvent {
+  final String pluginId;
+  const ReloadDevelopmentPluginRequested(this.pluginId);
+
+  @override
+  List<Object?> get props => [pluginId];
+}
+
+class DevelopmentPluginManifestChanged extends PluginSystemEvent {
+  final String pluginId;
+  const DevelopmentPluginManifestChanged(this.pluginId);
+
+  @override
+  List<Object?> get props => [pluginId];
+}

@@ -22,6 +22,33 @@ class PluginRegistryRepository {
   }
 
   Future<void> deletePlugin(String pluginId) async {
+    final plugin = await getPlugin(pluginId);
+    if (plugin != null && plugin.isDevelopment) {
+      throw ArgumentError('Cannot delete a development plugin. Use detachDevelopmentPlugin instead.');
+    }
+    await _db.deletePlugin(pluginId);
+  }
+
+  Future<List<InstalledPlugin>> getDevelopmentPlugins() async {
+    final plugins = await getAllPlugins();
+    return plugins.where((p) => p.isDevelopment).toList();
+  }
+
+  Future<void> saveDevelopmentPlugin(InstalledPlugin plugin) async {
+    if (!plugin.isDevelopment) {
+      throw ArgumentError('Cannot save a packaged plugin as development');
+    }
+    if (plugin.devRootPath == null || plugin.devRootPath!.trim().isEmpty) {
+      throw ArgumentError('Development plugin must have a valid devRootPath');
+    }
+    await _db.insertOrUpdatePlugin(plugin);
+  }
+
+  Future<void> detachDevelopmentPlugin(String pluginId) async {
+    final plugin = await getPlugin(pluginId);
+    if (plugin != null && !plugin.isDevelopment) {
+      throw ArgumentError('Cannot detach a packaged plugin. Use deletePlugin instead.');
+    }
     await _db.deletePlugin(pluginId);
   }
 

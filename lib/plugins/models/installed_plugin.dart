@@ -13,6 +13,11 @@ class InstalledPlugin {
   final PluginManifest manifest;
   final DateTime installedAt;
   final DateTime updatedAt;
+  final String sourceType;
+  final String? devRootPath;
+
+  bool get isDevelopment => sourceType == 'development';
+  String get resolvedRootPath => isDevelopment ? devRootPath! : installPath;
 
   InstalledPlugin({
     required this.pluginId,
@@ -26,6 +31,8 @@ class InstalledPlugin {
     required this.manifest,
     required this.installedAt,
     required this.updatedAt,
+    this.sourceType = 'packaged',
+    this.devRootPath,
   });
 
   factory InstalledPlugin.fromDbMap(Map<String, dynamic> map) {
@@ -41,6 +48,8 @@ class InstalledPlugin {
       manifest: PluginManifest.fromJson(jsonDecode(map['manifest_json'] as String)),
       installedAt: DateTime.parse(map['installed_at'] as String),
       updatedAt: DateTime.parse(map['updated_at'] as String),
+      sourceType: map['source_type'] as String? ?? 'packaged',
+      devRootPath: map['dev_root_path'] as String?,
     );
   }
 
@@ -57,6 +66,8 @@ class InstalledPlugin {
       'manifest_json': jsonEncode(manifest.toJson()),
       'installed_at': installedAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
+      'source_type': sourceType,
+      'dev_root_path': devRootPath,
     };
   }
 
@@ -72,6 +83,9 @@ class InstalledPlugin {
     PluginManifest? manifest,
     DateTime? installedAt,
     DateTime? updatedAt,
+    String? sourceType,
+    String? devRootPath,
+    bool clearDevRootPath = false,
   }) {
     return InstalledPlugin(
       pluginId: pluginId ?? this.pluginId,
@@ -85,6 +99,8 @@ class InstalledPlugin {
       manifest: manifest ?? this.manifest,
       installedAt: installedAt ?? this.installedAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      sourceType: sourceType ?? this.sourceType,
+      devRootPath: clearDevRootPath ? null : (devRootPath ?? this.devRootPath),
     );
   }
 }

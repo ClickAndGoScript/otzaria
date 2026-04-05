@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
@@ -102,23 +103,60 @@ class _PluginSettingsScreenState extends State<PluginSettingsScreen> {
                 ),
               ],
               const SizedBox(height: 32),
-              NeutralActionButton(
-                text: 'הסרת תוסף',
-                onPressed: () async {
-                  final confirm = await showWarningDialog(
-                     context: context,
-                     title: 'מחיקת תוסף סופית',
-                     content: 'האם אתה בטוח שברצונך למחוק את התוסף "${currentPlugin.name}"?',
-                     subtitle: 'המחיקה תכלול את כל נתוני התוסף, המטמון והפעולות שלו. הליך זה סופי.',
-                     cancelText: 'ביטול',
-                     confirmText: 'מחק',
-                  );
-                  if (confirm == true && context.mounted) {
-                     context.read<PluginSystemBloc>().add(UninstallPluginRequested(currentPlugin.pluginId));
-                     Navigator.of(context).pop();
-                  }
-                },
-              )
+              if (currentPlugin.isDevelopment) ...[
+                SettingsCard(
+                  title: 'פיתוח',
+                  children: [
+                    ListTile(
+                      title: const Text('נתיב תיקייה'),
+                      subtitle: Text(currentPlugin.resolvedRootPath),
+                    ),
+                    ListTile(
+                      title: const Text('רענן עכשיו'),
+                      trailing: const Icon(FluentIcons.arrow_clockwise_24_regular),
+                      onTap: () {
+                         context.read<PluginSystemBloc>().add(ReloadDevelopmentPluginRequested(currentPlugin.pluginId));
+                      },
+                      hoverColor: Colors.transparent,
+                    ),
+                    ListTile(
+                      title: const Text('פתח מחדש את הצפייה'),
+                      trailing: const Icon(FluentIcons.window_new_24_regular),
+                      onTap: () {
+                         context.read<PluginSystemBloc>().add(ReloadDevelopmentPluginRequested(currentPlugin.pluginId));
+                         Navigator.of(context).pop(true);
+                      },
+                      hoverColor: Colors.transparent,
+                    ),
+                  ]
+                ),
+                const SizedBox(height: 16),
+                NeutralActionButton(
+                  text: 'נתק תוסף פיתוח',
+                  onPressed: () async {
+                    context.read<PluginSystemBloc>().add(DetachDevelopmentPluginRequested(currentPlugin.pluginId));
+                    Navigator.of(context).pop();
+                  },
+                )
+              ] else ...[
+                NeutralActionButton(
+                  text: 'הסרת תוסף',
+                  onPressed: () async {
+                    final confirm = await showWarningDialog(
+                       context: context,
+                       title: 'מחיקת תוסף סופית',
+                       content: 'האם אתה בטוח שברצונך למחוק את התוסף "${currentPlugin.name}"?',
+                       subtitle: 'המחיקה תכלול את כל נתוני התוסף, המטמון והפעולות שלו. הליך זה סופי.',
+                       cancelText: 'ביטול',
+                       confirmText: 'מחק',
+                    );
+                    if (confirm == true && context.mounted) {
+                       context.read<PluginSystemBloc>().add(UninstallPluginRequested(currentPlugin.pluginId));
+                       Navigator.of(context).pop();
+                    }
+                  },
+                )
+              ]
             ],
           ),
         );

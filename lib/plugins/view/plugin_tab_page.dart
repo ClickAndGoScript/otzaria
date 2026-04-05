@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
+import 'package:otzaria/plugins/models/plugin_manifest.dart';
+import 'package:otzaria/plugins/services/plugin_manifest_validator.dart';
 import 'package:otzaria/plugins/bridge/plugin_bridge_handler.dart';
 import 'dart:io';
 import 'dart:convert';
@@ -21,6 +23,7 @@ import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
 import 'package:otzaria/workspaces/bloc/workspace_bloc.dart';
 import 'package:otzaria/utils/book_open_coordinator.dart';
 import 'package:otzaria/widgets/custom_ui_components.dart';
+import 'package:otzaria/plugins/view/plugin_dev_error_view.dart';
 
 // ---------------------------------------------------------------------------
 // Stub SDK — injected at AT_DOCUMENT_START before any page JS runs.
@@ -73,11 +76,12 @@ class PluginTabPage extends StatefulWidget {
 
 class _PluginTabPageState extends State<PluginTabPage> {
   InAppWebViewController? webViewController;
-  late final String localHtmlPath;
+  late String localHtmlPath;
   late final PluginBridgeHandler _bridge;
   late final PluginBridgeAdapter _adapter;
   late final PluginRegistryRepository _pluginRegistryRepository;
   bool _hasError = false;
+  String? _devErrorMessage;
 
   // Cache PackageInfo so the async gap in onLoadStop never crosses a dispose
   static PackageInfo? _cachedPackageInfo;
@@ -86,7 +90,7 @@ class _PluginTabPageState extends State<PluginTabPage> {
   void initState() {
     super.initState();
     localHtmlPath =
-        '${widget.plugin.installPath}/${widget.plugin.entrypointPath}';
+        '${widget.plugin.resolvedRootPath}/${widget.plugin.entrypointPath}';
     final historyBloc = context.read<HistoryBloc>();
     final tabsBloc = context.read<TabsBloc>();
     final navigationBloc = context.read<NavigationBloc>();
@@ -164,6 +168,52 @@ class _PluginTabPageState extends State<PluginTabPage> {
     );
     // Pre-fetch so onLoadStop has no async gap
     _ensurePackageInfo();
+    
+    PluginRuntimeDispatcher.instance.registerReloadCallback(
+      widget.plugin.pluginId,
+      _reloadFromDisk,
+    );
+  }
+
+  Future<void> _reloadFromDisk() async {
+    if (!mounted) return;
+    if (!widget.plugin.isDevelopment) return;
+
+    try {
+      await _ensurePackageInfo();
+      final manifestFile = File(p.join(widget.plugin.resolvedRootPath, 'manifest.json'));
+      if (!manifestFile.existsSync()) {
+        setState(() => _devErrorMessage = 'קובץ manifest.json חסר בתיקייה.');
+        return;
+      }
+      final manifestStr = await manifestFile.readAsString();
+      final manifestJson = jsonDecode(manifestStr);
+      
+      // Perform strict manifest validation
+      final manifest = PluginManifest.fromJson(manifestJson);
+      
+      await PluginManifestValidator.validateManifest(
+        manifest: manifest,
+        directoryPath: widget.plugin.resolvedRootPath,
+        currentAppVersion: _cachedPackageInfo?.version,
+      );
+      
+      if (manifest.id != widget.plugin.pluginId) {
+        setState(() => _devErrorMessage = 'מזהה התוסף (id) השתנה.\nמצופה: ${widget.plugin.pluginId}\nנמצא: ${manifest.id}\nשינוי ID דורש התקנה מחדש.');
+        return;
+      }
+
+      setState(() => _devErrorMessage = null);
+      
+      try {
+        await InAppWebViewController.clearAllCache();
+      } catch (_) {}
+
+      localHtmlPath = p.join(widget.plugin.resolvedRootPath, manifest.entrypoint);
+      await webViewController?.loadUrl(urlRequest: URLRequest(url: WebUri.uri(Uri.file(localHtmlPath))));
+    } catch (e) {
+      if (mounted) setState(() => _devErrorMessage = 'שגיאה בלתי צפויה בריענון התוסף: $e');
+    }
   }
 
   Future<void> _ensurePackageInfo() async {
@@ -174,6 +224,8 @@ class _PluginTabPageState extends State<PluginTabPage> {
   void dispose() {
     PluginRuntimeDispatcher.instance
         .unregisterController(widget.plugin.pluginId);
+    PluginRuntimeDispatcher.instance
+        .unregisterReloadCallback(widget.plugin.pluginId);
     super.dispose();
   }
 
@@ -185,6 +237,13 @@ class _PluginTabPageState extends State<PluginTabPage> {
           'התוסף כבוי על ידי המשתמש ולא ניתן להציגו.',
           style: TextStyle(color: Theme.of(context).colorScheme.error),
         ),
+      );
+    }
+
+    if (_devErrorMessage != null) {
+      return PluginDevErrorView(
+        plugin: widget.plugin,
+        errorMessage: _devErrorMessage!,
       );
     }
 
@@ -203,6 +262,8 @@ class _PluginTabPageState extends State<PluginTabPage> {
         allowUniversalAccessFromFileURLs: false,
         useShouldOverrideUrlLoading: true,
         useShouldInterceptRequest: true,
+        cacheEnabled: !widget.plugin.isDevelopment,
+        clearCache: widget.plugin.isDevelopment,
       ),
       // Stub SDK — injected BEFORE any page JS runs
       initialUserScripts: UnmodifiableListView<UserScript>([
@@ -223,7 +284,7 @@ class _PluginTabPageState extends State<PluginTabPage> {
 
         if (uri.scheme == 'file') {
           final normalizedUri = p.normalize(uri.toFilePath());
-          final normalizedInstall = p.normalize(widget.plugin.installPath);
+          final normalizedInstall = p.normalize(widget.plugin.resolvedRootPath);
           if (p.isWithin(normalizedInstall, normalizedUri) ||
               normalizedUri == normalizedInstall) {
             return NavigationActionPolicy.ALLOW;
@@ -256,7 +317,7 @@ class _PluginTabPageState extends State<PluginTabPage> {
         final uri = request.url;
         if (uri.scheme == 'file') {
           final normalizedUri = p.normalize(uri.toFilePath());
-          final normalizedInstall = p.normalize(widget.plugin.installPath);
+          final normalizedInstall = p.normalize(widget.plugin.resolvedRootPath);
           if (!p.isWithin(normalizedInstall, normalizedUri) &&
               normalizedUri != normalizedInstall) {
             return WebResourceResponse(

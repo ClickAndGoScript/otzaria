@@ -18,6 +18,23 @@ class PluginRuntimeDispatcher {
     _controllers.remove(pluginId);
   }
 
+  final Map<String, Future<void> Function()> _reloadCallbacks = {};
+
+  void registerReloadCallback(String pluginId, Future<void> Function() callback) {
+    _reloadCallbacks[pluginId] = callback;
+  }
+
+  void unregisterReloadCallback(String pluginId) {
+    _reloadCallbacks.remove(pluginId);
+  }
+
+  Future<void> reloadPlugin(String pluginId) async {
+    final callback = _reloadCallbacks[pluginId];
+    if (callback != null) {
+      await callback();
+    }
+  }
+
   Future<void> dispatchEvent(String topic, Map<String, dynamic> payload) async {
     final jsonPayload = jsonEncode(payload);
     debugPrint('PluginRuntimeDispatcher: Dispatching $topic');

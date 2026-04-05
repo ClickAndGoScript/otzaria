@@ -114,7 +114,12 @@ class MoreScreenState extends State<MoreScreen>
   String _lastDescriptorsSignature = '';
 
   String _descriptorSignature(List<ToolDescriptor> descriptors) {
-    return descriptors.map((descriptor) => descriptor.toolId).join('|');
+    return descriptors.map((d) {
+      if (d is PluginToolDescriptor) {
+        return '${d.toolId}|${d.label}|${d.order}|${d.plugin.pinned}|${d.plugin.updatedAt.millisecondsSinceEpoch}';
+      }
+      return '${d.toolId}|${d.label}|${d.order}';
+    }).join('::');
   }
 
   void _requestCalendarFocus(
@@ -331,6 +336,12 @@ class MoreScreenState extends State<MoreScreen>
     return BlocListener<PluginSystemBloc, PluginSystemState>(
       listener: (context, state) {
         if (state is PluginSystemLoaded) {
+          if (_transientPlugin != null) {
+            final updatedTransient = state.plugins.firstWhere(
+                (p) => p.pluginId == _transientPlugin!.pluginId,
+                orElse: () => _transientPlugin!);
+            _transientPlugin = updatedTransient;
+          }
           _rebuildTabs(state.pinnedPlugins, transient: _transientPlugin);
         } else if (state is PluginSystemOverwriteRequired) {
           showWarningDialog(
