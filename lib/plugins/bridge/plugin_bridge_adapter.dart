@@ -1,20 +1,17 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
 import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
-import 'package:otzaria/plugins/storage/plugin_system_database.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/personal_notes/repository/personal_notes_repository.dart';
 import 'package:otzaria/personal_notes/models/personal_note.dart';
 import 'package:otzaria/core/ui_snack.dart';
-import 'package:otzaria/widgets/custom_ui_components.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/search/search_repository.dart';
-import 'package:otzaria/utils/open_book.dart';
+import 'package:otzaria/utils/book_open_coordinator.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/tabs/models/pdf_tab.dart';
@@ -73,13 +70,22 @@ Map<String, dynamic> buildThemePayload(BuildContext context) {
   final theme = Theme.of(context);
   final cs = theme.colorScheme;
   final isDark = theme.brightness == Brightness.dark;
-  String hex(Color c) => '#${c.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+  String hex(Color c) =>
+      '#${c.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
 
-  final fontFamily = Settings.getValue<String>(SettingsRepository.keyFontFamily) ?? 'Frank Ruhl Libre';
-  final commentatorsFontFamily = Settings.getValue<String>(SettingsRepository.keyCommentatorsFontFamily) ?? 'Shofar';
-  final fontSize = Settings.getValue<double>(SettingsRepository.keyFontSize) ?? 25.0;
-  final commentatorsFontSize = Settings.getValue<double>(SettingsRepository.keyCommentatorsFontSize) ?? 22.0;
-  final lineHeight = Settings.getValue<double>(SettingsRepository.keyLineHeight) ?? 1.5;
+  final fontFamily =
+      Settings.getValue<String>(SettingsRepository.keyFontFamily) ??
+          'Frank Ruhl Libre';
+  final commentatorsFontFamily =
+      Settings.getValue<String>(SettingsRepository.keyCommentatorsFontFamily) ??
+          'Shofar';
+  final fontSize =
+      Settings.getValue<double>(SettingsRepository.keyFontSize) ?? 25.0;
+  final commentatorsFontSize =
+      Settings.getValue<double>(SettingsRepository.keyCommentatorsFontSize) ??
+          22.0;
+  final lineHeight =
+      Settings.getValue<double>(SettingsRepository.keyLineHeight) ?? 1.5;
 
   return {
     'mode': isDark ? 'dark' : 'light',
@@ -105,29 +111,83 @@ Map<String, dynamic> buildThemePayload(BuildContext context) {
   };
 }
 
+class PluginBridgeDependencies {
+  final HistoryBloc historyBloc;
+  final TabsBloc tabsBloc;
+  final NavigationBloc navigationBloc;
+  final CalendarCubit calendarCubit;
+  final WorkspaceBloc workspaceBloc;
+  final SearchRepository searchRepository;
+  final PersonalNotesRepository personalNotesRepository;
+  final BookOpenCoordinator bookOpenCoordinator;
+  final Map<String, dynamic> Function() themePayloadBuilder;
+  final Future<bool> Function({
+    required String title,
+    required String content,
+  }) showConfirmDialog;
+  final Future<bool> Function({
+    required String title,
+    required String content,
+    required String subtitle,
+  }) showWarningDialog;
+
+  const PluginBridgeDependencies({
+    required this.historyBloc,
+    required this.tabsBloc,
+    required this.navigationBloc,
+    required this.calendarCubit,
+    required this.workspaceBloc,
+    required this.searchRepository,
+    required this.personalNotesRepository,
+    required this.bookOpenCoordinator,
+    required this.themePayloadBuilder,
+    required this.showConfirmDialog,
+    required this.showWarningDialog,
+  });
+}
+
 // ===================================================================
 // Bridge Adapter - strict 1:1 with plugin_system_plan.md
 // ===================================================================
 class PluginBridgeAdapter {
   final InstalledPlugin plugin;
   final PluginRegistryRepository _pluginRepo;
+  final PluginBridgeDependencies _dependencies;
 
-  PluginBridgeAdapter(this.plugin) : _pluginRepo = PluginRegistryRepository();
+  PluginBridgeAdapter(
+    this.plugin, {
+    required PluginBridgeDependencies dependencies,
+    PluginRegistryRepository? pluginRepository,
+  })  : _dependencies = dependencies,
+        _pluginRepo = pluginRepository ?? PluginRegistryRepository();
 
-  Future<dynamic> execute(String domain, String action, Map<String, dynamic> args) async {
+  Future<dynamic> execute(
+      String domain, String action, Map<String, dynamic> args) async {
     switch (domain) {
-      case 'app':           return await _handleApp(action, args);
-      case 'library':       return await _handleLibrary(action, args);
-      case 'search':        return await _handleSearch(action, args);
-      case 'reader':        return await _handleReader(action, args);
-      case 'navigation':    return await _handleNavigation(action, args);
-      case 'notes':         return await _handleNotes(action, args);
-      case 'ui':            return await _handleUi(action, args);
-      case 'storage':       return await _handleStorage(action, args);
-      case 'settings':      return await _handleSettings(action, args);
-      case 'calendar':      return await _handleCalendar(action, args);
-      case 'publishedData': return await _handlePublishedData(action, args);
-      default: throw Exception("Unknown domain: $domain");
+      case 'app':
+        return await _handleApp(action, args);
+      case 'library':
+        return await _handleLibrary(action, args);
+      case 'search':
+        return await _handleSearch(action, args);
+      case 'reader':
+        return await _handleReader(action, args);
+      case 'navigation':
+        return await _handleNavigation(action, args);
+      case 'notes':
+        return await _handleNotes(action, args);
+      case 'ui':
+        return await _handleUi(action, args);
+      case 'storage':
+        return await _handleStorage(action, args);
+      case 'settings':
+        return await _handleSettings(action, args);
+      case 'calendar':
+        return await _handleCalendar(action, args);
+      case 'publishedData':
+        return await _handlePublishedData(action, args);
+      default:
+        throw Exception("Unknown domain: $domain");
     }
   }
 
@@ -144,19 +204,19 @@ class PluginBridgeAdapter {
           'platform': Platform.operatingSystem,
         };
       case 'getTheme':
-        final ctx = navigatorKey.currentContext;
-        if (ctx == null || !ctx.mounted) return {'mode': 'light', 'colorScheme': {}, 'typography': {}};
-        return buildThemePayload(ctx);
+        return _dependencies.themePayloadBuilder();
       case 'getLocale':
         return {'locale': 'he-IL', 'textDirection': 'rtl'};
-      default: throw Exception("Unknown action in app: $action");
+      default:
+        throw Exception("Unknown action in app: $action");
     }
   }
 
   // ----------------------------------------------------------------
   // library.*
   // ----------------------------------------------------------------
-  Future<dynamic> _handleLibrary(String action, Map<String, dynamic> args) async {
+  Future<dynamic> _handleLibrary(
+      String action, Map<String, dynamic> args) async {
     final library = await DataRepository.instance.library;
     switch (action) {
       case 'findBooks':
@@ -168,28 +228,32 @@ class PluginBridgeAdapter {
             .take(limit)
             // spec: returns [{bookId, title, author?, topics?}]
             .map((b) => {
-              'bookId': b.title,   // title is the stable ID in otzaria
-              'title': b.title,
-            })
+                  'bookId': b.title, // title is the stable ID in otzaria
+                  'title': b.title,
+                })
             .toList();
       case 'getBookMetadata':
         // spec: accepts bookId (= title in otzaria) or title for back-compat
         final bookId = (args['bookId'] ?? args['title']) as String?;
         if (bookId == null) throw Exception('bookId required');
         final allBooks = library.getAllBooks();
-        final book = allBooks.cast<dynamic>().firstWhere(
-          (b) => b?.title == bookId, orElse: () => null);
+        final book = allBooks
+            .cast<dynamic>()
+            .firstWhere((b) => b?.title == bookId, orElse: () => null);
         if (book == null) return null;
-        return {'bookId': book.title, 'title': book.title, 'topics': book.topics};
+        return {
+          'bookId': book.title,
+          'title': book.title,
+          'topics': book.topics
+        };
       case 'listRecentBooks':
-        final ctx = navigatorKey.currentContext;
-        if (ctx == null || !ctx.mounted) return [];
-        final historyState = ctx.read<HistoryBloc>().state;
+        final historyState = _dependencies.historyBloc.state;
         if (historyState is! HistoryLoaded) return [];
         return historyState.history
             .where((b) => !b.isSearch)
             .take(20)
-            .map((b) => {'bookId': b.book.title, 'title': b.book.title, 'ref': b.ref})
+            .map((b) =>
+                {'bookId': b.book.title, 'title': b.book.title, 'ref': b.ref})
             .toList();
       case 'getBookContent':
         final bookId = (args['bookId'] ?? args['title']) as String?;
@@ -210,36 +274,47 @@ class PluginBridgeAdapter {
         final bookId = (args['bookId'] ?? args['title']) as String?;
         if (bookId == null) throw Exception('bookId required');
         final allBooks = library.getAllBooks();
-        final book = allBooks.cast<dynamic>().firstWhere(
-          (b) => b?.title == bookId, orElse: () => null);
+        final book = allBooks
+            .cast<dynamic>()
+            .firstWhere((b) => b?.title == bookId, orElse: () => null);
         if (book != null && book is TextBook) {
           final toc = await book.tableOfContents;
-          return toc.map((e) => {'text': e.text, 'index': e.index, 'level': e.level}).toList();
+          return toc
+              .map((e) => {'text': e.text, 'index': e.index, 'level': e.level})
+              .toList();
         }
         return [];
-      default: throw Exception('Unknown action in library: $action');
+      default:
+        throw Exception('Unknown action in library: $action');
     }
   }
 
   // ----------------------------------------------------------------
   // search.*
   // ----------------------------------------------------------------
-  Future<dynamic> _handleSearch(String action, Map<String, dynamic> args) async {
+  Future<dynamic> _handleSearch(
+      String action, Map<String, dynamic> args) async {
     switch (action) {
       case 'fullText':
         final query = args['query'] as String?;
         final limit = args['limit'] as int? ?? 50;
         if (query == null || query.isEmpty) return [];
-        final results = await SearchRepository().searchTexts(query, [], limit);
-        return results.map((r) => {'book': r.title, 'text': r.text, 'index': r.segment.toInt()}).toList();
-      default: throw Exception("Unknown action in search: $action");
+        final results =
+            await _dependencies.searchRepository.searchTexts(query, [], limit);
+        return results
+            .map((r) =>
+                {'book': r.title, 'text': r.text, 'index': r.segment.toInt()})
+            .toList();
+      default:
+        throw Exception("Unknown action in search: $action");
     }
   }
 
   // ----------------------------------------------------------------
   // reader.*
   // ----------------------------------------------------------------
-  Future<dynamic> _handleReader(String action, Map<String, dynamic> args) async {
+  Future<dynamic> _handleReader(
+      String action, Map<String, dynamic> args) async {
     switch (action) {
       case 'openBook':
         // spec: openBook({ bookId, index?, searchQuery? })
@@ -249,12 +324,16 @@ class PluginBridgeAdapter {
         final searchQuery = args['searchQuery'] as String? ?? '';
         if (bookId == null) throw Exception('bookId required');
         final allBooks = (await DataRepository.instance.library).getAllBooks();
-        final book = allBooks.cast<dynamic>().firstWhere(
-          (b) => b?.title == bookId, orElse: () => null);
+        final book = allBooks
+            .cast<dynamic>()
+            .firstWhere((b) => b?.title == bookId, orElse: () => null);
         if (book == null) return false;
-        final ctx = navigatorKey.currentContext;
-        if (ctx == null || !ctx.mounted) throw Exception('UI Context missing');
-        openBook(ctx, book, index, searchQuery, ignoreHistory: true);
+        _dependencies.bookOpenCoordinator.openBook(
+          book,
+          index,
+          searchQuery,
+          ignoreHistory: true,
+        );
         return true;
       case 'openBookAtRef':
         // spec: openBookAtRef({ bookId, ref, index? })
@@ -263,65 +342,88 @@ class PluginBridgeAdapter {
         int index = args['index'] as int? ?? 0;
         if (bookId == null) throw Exception('bookId required');
         final allBooks = (await DataRepository.instance.library).getAllBooks();
-        final book = allBooks.cast<dynamic>().firstWhere(
-          (b) => b?.title == bookId, orElse: () => null);
+        final book = allBooks
+            .cast<dynamic>()
+            .firstWhere((b) => b?.title == bookId, orElse: () => null);
         if (book == null) return false;
         if (ref != null && ref.isNotEmpty && book is TextBook) {
           try {
             final toc = await book.tableOfContents;
             final entry = toc.cast<dynamic>().firstWhere(
-              (e) => e?.text != null && e.text.toString().contains(ref),
-              orElse: () => null,
-            );
+                  (e) => e?.text != null && e.text.toString().contains(ref),
+                  orElse: () => null,
+                );
             if (entry != null) index = entry.index as int;
           } catch (_) {}
         }
-        final ctx = navigatorKey.currentContext;
-        if (ctx == null || !ctx.mounted) throw Exception('UI Context missing');
-        openBook(ctx, book, index, ref ?? '', ignoreHistory: true);
+        _dependencies.bookOpenCoordinator.openBook(
+          book,
+          index,
+          ref ?? '',
+          ignoreHistory: true,
+        );
         return true;
       case 'getCurrentState':
-        final ctx = navigatorKey.currentContext;
-        if (ctx == null || !ctx.mounted) return null;
-        final tabsState = ctx.read<TabsBloc>().state;
+        final tabsState = _dependencies.tabsBloc.state;
         final currentTab = tabsState.currentTab;
-        final openTabs = tabsState.tabs.map((t) => {
-          'bookId': t.title,
-          'book': t.title,
-          'index': t is TextBookTab ? t.index : (t is PdfBookTab ? t.pageNumber : 0),
-        }).toList();
-        if (currentTab == null) return {'currentBook': null, 'currentIndex': 0, 'openTabs': openTabs};
+        final openTabs = tabsState.tabs
+            .map((t) => {
+                  'bookId': t.title,
+                  'book': t.title,
+                  'index': t is TextBookTab
+                      ? t.index
+                      : (t is PdfBookTab ? t.pageNumber : 0),
+                })
+            .toList();
+        if (currentTab == null) {
+          return {'currentBook': null, 'currentIndex': 0, 'openTabs': openTabs};
+        }
         return {
           'currentBook': currentTab.title,
           'currentBookId': currentTab.title,
-          'currentIndex': currentTab is TextBookTab ? currentTab.index : (currentTab is PdfBookTab ? currentTab.pageNumber : 0),
+          'currentIndex': currentTab is TextBookTab
+              ? currentTab.index
+              : (currentTab is PdfBookTab ? currentTab.pageNumber : 0),
           'openTabs': openTabs,
         };
-      default: throw Exception('Unknown action in reader: $action');
+      default:
+        throw Exception('Unknown action in reader: $action');
     }
   }
 
   // ----------------------------------------------------------------
   // navigation.*
   // ----------------------------------------------------------------
-  Future<dynamic> _handleNavigation(String action, Map<String, dynamic> args) async {
+  Future<dynamic> _handleNavigation(
+      String action, Map<String, dynamic> args) async {
     switch (action) {
       case 'goTo':
         final target = args['target'] as String?;
-        if (target == null) throw Exception("target required");
-        final ctx = navigatorKey.currentContext;
-        if (ctx == null || !ctx.mounted) return false;
+        if (target == null) {
+          throw Exception("target required");
+        }
         Screen? screen;
         switch (target) {
-          case 'library': screen = Screen.library; break;
-          case 'reading': screen = Screen.reading; break;
-          case 'more':    screen = Screen.more;    break;
-          case 'settings': screen = Screen.settings; break;
-          default: throw Exception("Invalid navigation target: $target. Valid: library, reading, more, settings");
+          case 'library':
+            screen = Screen.library;
+            break;
+          case 'reading':
+            screen = Screen.reading;
+            break;
+          case 'more':
+            screen = Screen.more;
+            break;
+          case 'settings':
+            screen = Screen.settings;
+            break;
+          default:
+            throw Exception(
+                "Invalid navigation target: $target. Valid: library, reading, more, settings");
         }
-        ctx.read<NavigationBloc>().add(NavigateToScreen(screen));
+        _dependencies.navigationBloc.add(NavigateToScreen(screen));
         return true;
-      default: throw Exception("Unknown action in navigation: $action");
+      default:
+        throw Exception("Unknown action in navigation: $action");
     }
   }
 
@@ -329,21 +431,36 @@ class PluginBridgeAdapter {
   // notes.*
   // ----------------------------------------------------------------
   Future<dynamic> _handleNotes(String action, Map<String, dynamic> args) async {
-    final repo = PersonalNotesRepository();
+    final repo = _dependencies.personalNotesRepository;
     switch (action) {
       case 'list':
         final bookId = args['bookId'] as String?;
         if (bookId == null) throw Exception("bookId required");
         final notes = await repo.loadNotes(bookId);
-        return notes.map((n) => {'id': n.id, 'lineNumber': n.lineNumber, 'content': n.content, 'contentPlain': n.contentPlain}).toList();
+        return notes
+            .map((n) => {
+                  'id': n.id,
+                  'lineNumber': n.lineNumber,
+                  'content': n.content,
+                  'contentPlain': n.contentPlain
+                })
+            .toList();
       case 'getBookNotesSummary':
         final summaries = await repo.listBooksWithNotes();
-        return summaries.map((s) => {'bookId': s.bookId, 'noteCount': s.noteCount, 'lastModified': s.lastUpdated.toIso8601String()}).toList();
+        return summaries
+            .map((s) => {
+                  'bookId': s.bookId,
+                  'noteCount': s.noteCount,
+                  'lastModified': s.lastUpdated.toIso8601String()
+                })
+            .toList();
       case 'add':
         final bookId = args['bookId'] as String?;
         final lineNumber = args['lineNumber'] as int?;
         final content = args['content'] as String?;
-        if (bookId == null || lineNumber == null || content == null) throw Exception("Missing arguments");
+        if (bookId == null || lineNumber == null || content == null) {
+          throw Exception("Missing arguments");
+        }
         await repo.addNote(
           bookId: bookId,
           lineNumber: lineNumber,
@@ -356,16 +473,26 @@ class PluginBridgeAdapter {
         final bookId = args['bookId'] as String?;
         final noteId = args['noteId'] as String?;
         final content = args['content'] as String?;
-        if (bookId == null || noteId == null || content == null) throw Exception("Missing arguments");
-        await repo.updateNote(bookId: bookId, noteId: noteId, content: content, contentPlain: content, contentFormat: PersonalNoteContentFormat.plain);
+        if (bookId == null || noteId == null || content == null) {
+          throw Exception("Missing arguments");
+        }
+        await repo.updateNote(
+            bookId: bookId,
+            noteId: noteId,
+            content: content,
+            contentPlain: content,
+            contentFormat: PersonalNoteContentFormat.plain);
         return true;
       case 'delete':
         final bookId = args['bookId'] as String?;
         final noteId = args['noteId'] as String?;
-        if (bookId == null || noteId == null) throw Exception("Missing arguments");
+        if (bookId == null || noteId == null) {
+          throw Exception("Missing arguments");
+        }
         await repo.deleteNote(bookId: bookId, noteId: noteId);
         return true;
-      default: throw Exception("Unknown action in notes: $action");
+      default:
+        throw Exception("Unknown action in notes: $action");
     }
   }
 
@@ -373,8 +500,6 @@ class PluginBridgeAdapter {
   // ui.*
   // ----------------------------------------------------------------
   Future<dynamic> _handleUi(String action, Map<String, dynamic> args) async {
-    final ctx = navigatorKey.currentContext;
-    if (ctx == null || !ctx.mounted) throw Exception("No UI context available");
     switch (action) {
       case 'showMessage':
         UiSnack.show(args['message'] as String? ?? '');
@@ -386,32 +511,28 @@ class PluginBridgeAdapter {
         UiSnack.showError(args['message'] as String? ?? '');
         return true;
       case 'showConfirm':
-        final result = await showTwoActionsDialog(
-          context: ctx,
+        final result = await _dependencies.showConfirmDialog(
           title: args['title'] as String? ?? 'אישור',
           content: args['content'] as String? ?? '',
-          cancelText: 'ביטול',
-          confirmText: 'אישור',
         );
-        return {'confirmed': result == true};
+        return {'confirmed': result};
       case 'showWarning':
-        final result = await showWarningDialog(
-          context: ctx,
+        final result = await _dependencies.showWarningDialog(
           title: args['title'] as String? ?? 'אזהרה',
           content: args['content'] as String? ?? '',
           subtitle: args['subtitle'] as String? ?? '',
-          cancelText: 'ביטול',
-          confirmText: 'המשך',
         );
-        return {'confirmed': result == true};
-      default: throw Exception("Unknown action in ui: $action");
+        return {'confirmed': result};
+      default:
+        throw Exception("Unknown action in ui: $action");
     }
   }
 
   // ----------------------------------------------------------------
   // storage.*
   // ----------------------------------------------------------------
-  Future<dynamic> _handleStorage(String action, Map<String, dynamic> args) async {
+  Future<dynamic> _handleStorage(
+      String action, Map<String, dynamic> args) async {
     switch (action) {
       case 'get':
         final key = args['key'] as String?;
@@ -421,33 +542,29 @@ class PluginBridgeAdapter {
       case 'set':
         final key = args['key'] as String?;
         final value = args['value'];
-        if (key == null || value == null) throw Exception("key and value required");
-        await _pluginRepo.setKV(plugin.pluginId, 'default', key, jsonEncode(value));
+        if (key == null || value == null) {
+          throw Exception("key and value required");
+        }
+        await _pluginRepo.setKV(
+            plugin.pluginId, 'default', key, jsonEncode(value));
         return true;
       case 'remove':
         final key = args['key'] as String?;
         if (key == null) throw Exception("key required");
-        final db = await PluginSystemDatabase.instance.database;
-        db.execute(
-          'DELETE FROM plugin_kv_store WHERE plugin_id = ? AND namespace = ? AND key = ?',
-          [plugin.pluginId, 'default', key],
-        );
+        await _pluginRepo.removeKV(plugin.pluginId, 'default', key);
         return true;
       case 'list':
-        final db = await PluginSystemDatabase.instance.database;
-        final rows = db.select(
-          'SELECT key FROM plugin_kv_store WHERE plugin_id = ? AND namespace = ?',
-          [plugin.pluginId, 'default'],
-        );
-        return rows.map((r) => r['key'] as String).toList();
-      default: throw Exception("Unknown action in storage: $action");
+        return _pluginRepo.listKVKeys(plugin.pluginId, 'default');
+      default:
+        throw Exception("Unknown action in storage: $action");
     }
   }
 
   // ----------------------------------------------------------------
   // settings.*
   // ----------------------------------------------------------------
-  Future<dynamic> _handleSettings(String action, Map<String, dynamic> args) async {
+  Future<dynamic> _handleSettings(
+      String action, Map<String, dynamic> args) async {
     bool isAllowed(String key) =>
         _settingsAllowlist.contains(key) && !_settingsBlocklist.contains(key);
 
@@ -463,17 +580,17 @@ class PluginBridgeAdapter {
           if (isAllowed(k)) res[k] = Settings.getValue(k);
         }
         return res;
-      default: throw Exception("Unknown action in settings: $action");
+      default:
+        throw Exception("Unknown action in settings: $action");
     }
   }
 
   // ----------------------------------------------------------------
   // calendar.*
   // ----------------------------------------------------------------
-  Future<dynamic> _handleCalendar(String action, Map<String, dynamic> args) async {
-    final ctx = navigatorKey.currentContext;
-    if (ctx == null || !ctx.mounted) return null;
-    final calendarState = ctx.read<CalendarCubit>().state;
+  Future<dynamic> _handleCalendar(
+      String action, Map<String, dynamic> args) async {
+    final calendarState = _dependencies.calendarCubit.state;
 
     switch (action) {
       case 'getSelectedDate':
@@ -493,79 +610,82 @@ class PluginBridgeAdapter {
         };
       case 'getEvents':
         final date = args['date'] != null
-            ? DateTime.tryParse(args['date'] as String) ?? calendarState.selectedGregorianDate
+            ? DateTime.tryParse(args['date'] as String) ??
+                calendarState.selectedGregorianDate
             : calendarState.selectedGregorianDate;
-        final events = calendarState.events.where((e) {
-          final eventDate = e.baseGregorianDate;
-          return eventDate.year == date.year && eventDate.month == date.month && eventDate.day == date.day;
-        }).map((e) => {
-          'id': e.id,
-          'title': e.title,
-          'date': e.baseGregorianDate.toIso8601String(),
-          'description': e.description,
-        }).toList();
+        final events = calendarState.events
+            .where((e) {
+              final eventDate = e.baseGregorianDate;
+              return eventDate.year == date.year &&
+                  eventDate.month == date.month &&
+                  eventDate.day == date.day;
+            })
+            .map((e) => {
+                  'id': e.id,
+                  'title': e.title,
+                  'date': e.baseGregorianDate.toIso8601String(),
+                  'description': e.description,
+                })
+            .toList();
         return events;
-      default: throw Exception("Unknown action in calendar: $action");
+      default:
+        throw Exception("Unknown action in calendar: $action");
     }
   }
 
   // ----------------------------------------------------------------
   // publishedData.*
   // ----------------------------------------------------------------
-  Future<dynamic> _handlePublishedData(String action, Map<String, dynamic> args) async {
+  Future<dynamic> _handlePublishedData(
+      String action, Map<String, dynamic> args) async {
     switch (action) {
       case 'upsert':
         final type = args['type'] as String?;
         final scope = args['scope'] as String? ?? 'global';
         final key = args['key'] as String?;
         final payload = args['payload'];
-        if (type == null || key == null || payload == null) throw Exception('type, key, payload required');
-        await _pluginRepo.publishRecord(plugin.pluginId, type, scope, key, jsonEncode(payload), null);
+        if (type == null || key == null || payload == null) {
+          throw Exception('type, key, payload required');
+        }
+        await _pluginRepo.publishRecord(
+            plugin.pluginId, type, scope, key, jsonEncode(payload), null);
         // רענון חי של לוח השנה כשמדובר באירוע לוח
         if (type == 'calendar.event') {
-          final ctx = navigatorKey.currentContext;
-          if (ctx != null && ctx.mounted) {
-            final currentBookId = _currentBookId(ctx);
-            final currentWorkspaceId = _currentWorkspaceId(ctx);
-            ctx.read<CalendarCubit>().refreshPluginEvents(
-              currentBookId: currentBookId,
-              currentWorkspaceId: currentWorkspaceId,
-            );
-          }
+          _dependencies.calendarCubit.refreshPluginEvents(
+            currentBookId: _currentBookId(),
+            currentWorkspaceId: _currentWorkspaceId(),
+          );
         }
         return true;
       case 'remove':
         final type = args['type'] as String?;
         final scope = args['scope'] as String? ?? 'global';
         final key = args['key'] as String?;
-        if (type == null || key == null) throw Exception('type and key required');
+        if (type == null || key == null) {
+          throw Exception('type and key required');
+        }
         await _pluginRepo.unpublishRecord(plugin.pluginId, type, scope, key);
         // רענון חי של לוח השנה
         if (type == 'calendar.event') {
-          final ctx = navigatorKey.currentContext;
-          if (ctx != null && ctx.mounted) {
-            final currentBookId = _currentBookId(ctx);
-            final currentWorkspaceId = _currentWorkspaceId(ctx);
-            ctx.read<CalendarCubit>().refreshPluginEvents(
-              currentBookId: currentBookId,
-              currentWorkspaceId: currentWorkspaceId,
-            );
-          }
+          _dependencies.calendarCubit.refreshPluginEvents(
+            currentBookId: _currentBookId(),
+            currentWorkspaceId: _currentWorkspaceId(),
+          );
         }
         return true;
       case 'listOwn':
-        final db = await PluginSystemDatabase.instance.database;
-        final rows = db.select(
-          'SELECT type, scope, record_key, payload_json FROM plugin_published_record WHERE plugin_id = ?',
-          [plugin.pluginId],
-        );
-        return rows.map((r) => {
-          'type': r['type'] as String,
-          'scope': r['scope'] as String,
-          'key': r['record_key'] as String,
-          'payload': jsonDecode(r['payload_json'] as String),
-        }).toList();
-      default: throw Exception("Unknown action in publishedData: $action");
+        final rows =
+            await _pluginRepo.getPluginPublishedRecords(plugin.pluginId);
+        return rows
+            .map((record) => {
+                  'type': record.type,
+                  'scope': record.scope,
+                  'key': record.key,
+                  'payload': record.decodedPayload,
+                })
+            .toList();
+      default:
+        throw Exception("Unknown action in publishedData: $action");
     }
   }
 
@@ -573,21 +693,11 @@ class PluginBridgeAdapter {
   // Helpers
   // ----------------------------------------------------------------
 
-  /// מחזיר את שם הספר הנוכחי (title מ-TabsBloc) לצורך סינון book-scope.
-  String? _currentBookId(BuildContext context) {
-    try {
-      return context.read<TabsBloc>().state.currentTab?.title;
-    } catch (_) {
-      return null;
-    }
+  String? _currentBookId() {
+    return _dependencies.tabsBloc.state.currentTab?.title;
   }
 
-  /// מחזיר את ה-workspace הפעיל כרגע לצורך סינון workspace-scope.
-  String? _currentWorkspaceId(BuildContext context) {
-    try {
-      return context.read<WorkspaceBloc>().state.activeWorkspaceId;
-    } catch (_) {
-      return null;
-    }
+  String? _currentWorkspaceId() {
+    return _dependencies.workspaceBloc.state.activeWorkspaceId;
   }
 }

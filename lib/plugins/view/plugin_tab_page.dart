@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
 import 'package:otzaria/plugins/bridge/plugin_bridge_handler.dart';
@@ -10,7 +11,56 @@ import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
 import 'package:otzaria/plugins/storage/plugin_system_database.dart';
 import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:otzaria/plugins/bridge/plugin_bridge_adapter.dart' show buildThemePayload;
+import 'package:otzaria/plugins/bridge/plugin_bridge_adapter.dart';
+import 'package:otzaria/tools/calendar/ulits/calendar_cubit.dart';
+import 'package:otzaria/search/search_repository.dart';
+import 'package:otzaria/personal_notes/repository/personal_notes_repository.dart';
+import 'package:otzaria/history/bloc/history_bloc.dart';
+import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
+import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
+import 'package:otzaria/workspaces/bloc/workspace_bloc.dart';
+import 'package:otzaria/utils/book_open_coordinator.dart';
+import 'package:otzaria/widgets/custom_ui_components.dart';
+
+// ---------------------------------------------------------------------------
+// Stub SDK — injected at AT_DOCUMENT_START before any page JS runs.
+// Queues all Otzaria.on() calls so they survive the async boot gap.
+// ---------------------------------------------------------------------------
+const String _sdkStub = r'''
+(function () {
+  var _queue = [];
+  var _realSdk = null;
+
+  window.Otzaria = {
+    call: function (method, payload) {
+      if (_realSdk) return _realSdk.call(method, payload);
+      return Promise.reject(new Error('Otzaria SDK not ready yet'));
+    },
+    on: function (event, cb) {
+      if (_realSdk) { _realSdk.on(event, cb); }
+      else { _queue.push({ event: event, cb: cb }); }
+    },
+    off: function (event, cb) {
+      if (_realSdk) _realSdk.off(event, cb);
+    },
+    /* Called by Flutter once the real SDK + boot payload are ready */
+    _boot: function (sdk, payload) {
+      _realSdk = sdk;
+      // Re-register all listeners that were queued before boot
+      _queue.forEach(function (item) { sdk.on(item.event, item.cb); });
+      _queue = [];
+      window.dispatchEvent(new CustomEvent('plugin.boot', { detail: payload }));
+      window.dispatchEvent(new CustomEvent('plugin.ready', { detail: null }));
+    }
+  };
+
+  // Block window.open for security
+  window.open = function () {
+    console.error('window.open is locked for security.');
+    return null;
+  };
+})();
+''';
 
 class PluginTabPage extends StatefulWidget {
   final InstalledPlugin plugin;
@@ -25,18 +75,105 @@ class _PluginTabPageState extends State<PluginTabPage> {
   InAppWebViewController? webViewController;
   late final String localHtmlPath;
   late final PluginBridgeHandler _bridge;
+  late final PluginBridgeAdapter _adapter;
+  late final PluginRegistryRepository _pluginRegistryRepository;
   bool _hasError = false;
+
+  // Cache PackageInfo so the async gap in onLoadStop never crosses a dispose
+  static PackageInfo? _cachedPackageInfo;
 
   @override
   void initState() {
     super.initState();
-    localHtmlPath = '${widget.plugin.installPath}/${widget.plugin.entrypointPath}';
-    _bridge = PluginBridgeHandler(widget.plugin);
+    localHtmlPath =
+        '${widget.plugin.installPath}/${widget.plugin.entrypointPath}';
+    final historyBloc = context.read<HistoryBloc>();
+    final tabsBloc = context.read<TabsBloc>();
+    final navigationBloc = context.read<NavigationBloc>();
+    final calendarCubit = context.read<CalendarCubit>();
+    final workspaceBloc = context.read<WorkspaceBloc>();
+    final searchRepository = SearchRepository();
+    final personalNotesRepository = PersonalNotesRepository();
+    final pluginRegistryRepository = PluginRegistryRepository();
+
+    final dependencies = PluginBridgeDependencies(
+      historyBloc: historyBloc,
+      tabsBloc: tabsBloc,
+      navigationBloc: navigationBloc,
+      calendarCubit: calendarCubit,
+      workspaceBloc: workspaceBloc,
+      searchRepository: searchRepository,
+      personalNotesRepository: personalNotesRepository,
+      bookOpenCoordinator: BookOpenCoordinator(
+        tabsBloc: tabsBloc,
+        historyBloc: historyBloc,
+        navigationBloc: navigationBloc,
+      ),
+      themePayloadBuilder: () {
+        if (!mounted) {
+          return {
+            'mode': 'light',
+            'colorScheme': <String, dynamic>{},
+            'typography': <String, dynamic>{},
+          };
+        }
+        return buildThemePayload(context);
+      },
+      showConfirmDialog: ({
+        required String title,
+        required String content,
+      }) async {
+        if (!mounted) return false;
+        return await showTwoActionsDialog(
+              context: context,
+              title: title,
+              content: content,
+              cancelText: 'ביטול',
+              confirmText: 'אישור',
+            ) ==
+            true;
+      },
+      showWarningDialog: ({
+        required String title,
+        required String content,
+        required String subtitle,
+      }) async {
+        if (!mounted) return false;
+        return await showWarningDialog(
+              context: context,
+              title: title,
+              content: content,
+              subtitle: subtitle,
+              cancelText: 'ביטול',
+              confirmText: 'המשך',
+            ) ==
+            true;
+      },
+    );
+
+    _pluginRegistryRepository = pluginRegistryRepository;
+    _adapter = PluginBridgeAdapter(
+      widget.plugin,
+      dependencies: dependencies,
+      pluginRepository: pluginRegistryRepository,
+    );
+    _bridge = PluginBridgeHandler(
+      widget.plugin,
+      adapter: _adapter,
+      registry: pluginRegistryRepository,
+    );
+    // Pre-fetch so onLoadStop has no async gap
+    _ensurePackageInfo();
+  }
+
+  Future<void> _ensurePackageInfo() async {
+    _cachedPackageInfo ??= await PackageInfo.fromPlatform();
   }
 
   @override
   void dispose() {
-    PluginRuntimeDispatcher.instance.unregisterController(widget.plugin.pluginId);
+    PluginRuntimeDispatcher.instance
+        .unregisterController(widget.plugin.pluginId);
     super.dispose();
   }
 
@@ -44,44 +181,40 @@ class _PluginTabPageState extends State<PluginTabPage> {
   Widget build(BuildContext context) {
     if (!widget.plugin.enabled) {
       return Center(
-        child: Text('התוסף כבוי על ידי המשתמש ולא ניתן להציגו.', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        child: Text(
+          'התוסף כבוי על ידי המשתמש ולא ניתן להציגו.',
+          style: TextStyle(color: Theme.of(context).colorScheme.error),
+        ),
       );
     }
 
     if (_hasError) {
-      return Center(
-        child: Text('שגיאה בטעינת הקובץ: $localHtmlPath'),
-      );
+      return Center(child: Text('שגיאה בטעינת הקובץ: $localHtmlPath'));
     }
 
     if (!File(localHtmlPath).existsSync()) {
-      return Center(
-        child: Text('קובץ הכניסה של התוסף לא קיים בנתיב: $localHtmlPath'),
-      );
+      return const SizedBox.shrink(); // התוסף כבר הוסר — הטאב ייסגר בקרוב
     }
 
     return InAppWebView(
-      initialFile: localHtmlPath,
+      initialUrlRequest: URLRequest(url: WebUri.uri(Uri.file(localHtmlPath))),
       initialSettings: InAppWebViewSettings(
         allowFileAccessFromFileURLs: false,
         allowUniversalAccessFromFileURLs: false,
         useShouldOverrideUrlLoading: true,
         useShouldInterceptRequest: true,
       ),
+      // Stub SDK — injected BEFORE any page JS runs
       initialUserScripts: UnmodifiableListView<UserScript>([
         UserScript(
-          source: '''
-            window.open = function() {
-              console.error('window.open is locked for security measures.');
-              return null;
-            };
-          ''',
+          source: _sdkStub,
           injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
         ),
       ]),
       onWebViewCreated: (controller) {
         webViewController = controller;
-        PluginRuntimeDispatcher.instance.registerController(widget.plugin.pluginId, controller);
+        PluginRuntimeDispatcher.instance
+            .registerController(widget.plugin.pluginId, controller);
         _bridge.register(controller);
       },
       shouldOverrideUrlLoading: (controller, navigationAction) async {
@@ -91,21 +224,26 @@ class _PluginTabPageState extends State<PluginTabPage> {
         if (uri.scheme == 'file') {
           final normalizedUri = p.normalize(uri.toFilePath());
           final normalizedInstall = p.normalize(widget.plugin.installPath);
-          if (p.isWithin(normalizedInstall, normalizedUri) || normalizedUri == normalizedInstall) {
+          if (p.isWithin(normalizedInstall, normalizedUri) ||
+              normalizedUri == normalizedInstall) {
             return NavigationActionPolicy.ALLOW;
           }
-        } else if (uri.scheme == 'data' || uri.scheme == 'blob' || uri.scheme == 'about') {
+        } else if (uri.scheme == 'data' ||
+            uri.scheme == 'blob' ||
+            uri.scheme == 'about') {
           return NavigationActionPolicy.ALLOW;
         }
 
-        // HTTP/HTTPS: require network.access in manifest AND granted in DB
         if (uri.scheme == 'http' || uri.scheme == 'https') {
           if (widget.plugin.manifest.networkEnabled) {
-            final granted = await PluginRegistryRepository().getPermission(
-                widget.plugin.pluginId, 'network.access');
+            final granted = await _pluginRegistryRepository.getPermission(
+              widget.plugin.pluginId,
+              'network.access',
+            );
             if (granted == true) {
               final allowlist = widget.plugin.manifest.networkAllowlist;
-              if (allowlist.any((domain) => uri.host == domain || uri.host.endsWith('.$domain'))) {
+              if (allowlist.any((domain) =>
+                  uri.host == domain || uri.host.endsWith('.$domain'))) {
                 return NavigationActionPolicy.ALLOW;
               }
             }
@@ -119,97 +257,110 @@ class _PluginTabPageState extends State<PluginTabPage> {
         if (uri.scheme == 'file') {
           final normalizedUri = p.normalize(uri.toFilePath());
           final normalizedInstall = p.normalize(widget.plugin.installPath);
-          if (!p.isWithin(normalizedInstall, normalizedUri) && normalizedUri != normalizedInstall) {
-            return WebResourceResponse(statusCode: 403, reasonPhrase: 'Forbidden');
+          if (!p.isWithin(normalizedInstall, normalizedUri) &&
+              normalizedUri != normalizedInstall) {
+            return WebResourceResponse(
+                statusCode: 403, reasonPhrase: 'Forbidden');
           }
         }
         if (uri.scheme == 'http' || uri.scheme == 'https') {
           if (widget.plugin.manifest.networkEnabled) {
-            final granted = await PluginRegistryRepository().getPermission(
-                widget.plugin.pluginId, 'network.access');
+            final granted = await _pluginRegistryRepository.getPermission(
+              widget.plugin.pluginId,
+              'network.access',
+            );
             if (granted == true) {
               final allowlist = widget.plugin.manifest.networkAllowlist;
-              if (!allowlist.any((domain) => uri.host == domain || uri.host.endsWith('.$domain'))) {
-                return WebResourceResponse(statusCode: 403, reasonPhrase: 'Forbidden');
+              if (!allowlist.any((domain) =>
+                  uri.host == domain || uri.host.endsWith('.$domain'))) {
+                return WebResourceResponse(
+                    statusCode: 403, reasonPhrase: 'Forbidden');
               }
-              return null; // Allow
+              return null;
             }
           }
-          return WebResourceResponse(statusCode: 403, reasonPhrase: 'Forbidden');
+          return WebResourceResponse(
+              statusCode: 403, reasonPhrase: 'Forbidden');
         }
         return null;
       },
       onLoadStop: (controller, url) async {
+        // לוכד theme לפני ה-await (context חייב להישמר synchronously)
         final theme = buildThemePayload(context);
 
-        final packageInfo = await PackageInfo.fromPlatform();
+        // Use cached PackageInfo — avoids async gap crossing a dispose
+        final packageInfo =
+            _cachedPackageInfo ?? await PackageInfo.fromPlatform();
         if (!mounted) return;
-        final appVersion = packageInfo.version;
-
-        // Build Boot Payload - full spec compliant
+        final permissions = await _pluginRegistryRepository.getPluginPermissions(
+          widget.plugin.pluginId,
+        );
+        if (!mounted) return;
         final bootPayload = {
           'plugin': {
             'id': widget.plugin.pluginId,
             'version': widget.plugin.version,
           },
           'app': {
-            'version': appVersion,
+            'version': packageInfo.version,
             'platform': Platform.operatingSystem,
             'locale': 'he-IL',
-            'textDirection': 'rtl'
+            'textDirection': 'rtl',
           },
           'theme': theme,
-          'permissions': widget.plugin.manifest.permissions,
+          'permissions': permissions
+              .where((permission) => permission.granted)
+              .map((permission) => permission.permission)
+              .toList(),
         };
 
         final jsonPayload = jsonEncode(bootPayload);
 
-        // Inject JS API - full spec-compliant SDK
+        // Real SDK — injected after load, calls _boot() which re-plays queued
+        // Otzaria.on() calls and then fires plugin.boot
         await controller.evaluateJavascript(source: '''
-          (function() {
-            var _listeners = {};
-
-            window.Otzaria = {
-              call: function(methodName, payload) {
-                return window.flutter_inappwebview.callHandler('otzaria_rpc', {
-                  method: methodName,
-                  payload: payload || {}
-                });
-              },
-              on: function(event, cb) {
-                if (!_listeners[event]) _listeners[event] = [];
-                var wrapped = function(e) { cb(e.detail); };
-                _listeners[event].push({ original: cb, wrapped: wrapped });
-                window.addEventListener(event, wrapped);
-              },
-              off: function(event, cb) {
-                var list = _listeners[event];
-                if (!list) return;
-                for (var i = 0; i < list.length; i++) {
-                  if (list[i].original === cb) {
-                    window.removeEventListener(event, list[i].wrapped);
-                    list.splice(i, 1);
-                    break;
-                  }
-                }
-              }
-            };
-
-            window.dispatchEvent(new CustomEvent('plugin.boot', { detail: $jsonPayload }));
-            window.dispatchEvent(new Event('plugin.ready'));
-          })();
-        ''');
+(function () {
+  var _ls = {};
+  var realSdk = {
+    call: function (method, payload) {
+      return window.flutter_inappwebview.callHandler('otzaria_rpc', {
+        method: method,
+        payload: payload || {}
+      });
+    },
+    on: function (event, cb) {
+      if (!_ls[event]) _ls[event] = [];
+      var w = function (e) { cb(e.detail); };
+      _ls[event].push({ orig: cb, wrap: w });
+      window.addEventListener(event, w);
+    },
+    off: function (event, cb) {
+      var list = _ls[event];
+      if (!list) return;
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].orig === cb) {
+          window.removeEventListener(event, list[i].wrap);
+          list.splice(i, 1);
+          break;
+        }
+      }
+    }
+  };
+  window.Otzaria._boot(realSdk, $jsonPayload);
+})();
+''');
       },
       onReceivedError: (controller, request, error) {
-        setState(() {
-          _hasError = true;
-        });
+        if (mounted) setState(() => _hasError = true);
       },
       onConsoleMessage: (controller, consoleMessage) {
-        if (consoleMessage.messageLevel == ConsoleMessageLevel.ERROR || consoleMessage.messageLevel == ConsoleMessageLevel.WARNING) {
-          PluginSystemDatabase.instance.writeLog(widget.plugin.pluginId, consoleMessage.messageLevel.toString(), consoleMessage.message);
+        if (consoleMessage.messageLevel == ConsoleMessageLevel.ERROR ||
+            consoleMessage.messageLevel == ConsoleMessageLevel.WARNING) {
+          PluginSystemDatabase.instance.writeLog(widget.plugin.pluginId,
+              consoleMessage.messageLevel.toString(), consoleMessage.message);
         }
-        debugPrint('Plugin [${widget.plugin.pluginId}]: ${consoleMessage.message}');
+        debugPrint(
+            'Plugin [${widget.plugin.pluginId}]: ${consoleMessage.message}');
       },
     );
   }

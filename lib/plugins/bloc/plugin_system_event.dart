@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import 'package:otzaria/plugins/models/plugin_manifest.dart';
 
 sealed class PluginSystemEvent extends Equatable {
   const PluginSystemEvent();
@@ -20,7 +21,7 @@ class InstallPluginRequested extends PluginSystemEvent {
 
 class ConfirmPluginInstall extends PluginSystemEvent {
   final String tempDirPath;
-  final dynamic manifest; // Passed as dynamic here or use PluginManifest
+  final PluginManifest manifest;
   const ConfirmPluginInstall(this.tempDirPath, this.manifest);
 
   @override

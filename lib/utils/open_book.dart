@@ -1,56 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:otzaria/history/bloc/history_bloc.dart';
-import 'package:otzaria/history/bloc/history_event.dart';
 import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
-import 'package:otzaria/navigation/bloc/navigation_event.dart';
-import 'package:otzaria/navigation/bloc/navigation_state.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
-import 'package:otzaria/tabs/bloc/tabs_event.dart';
 import 'package:otzaria/models/books.dart';
 import "package:flutter_bloc/flutter_bloc.dart";
-import 'package:otzaria/tabs/models/tab.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
-import 'package:collection/collection.dart';
-import 'package:otzaria/text_book/view/page_shape/utils/page_shape_settings_manager.dart';
+import 'package:otzaria/utils/book_open_coordinator.dart';
 
 void openBook(BuildContext context, Book book, int index, String searchQuery,
     {bool ignoreHistory = false}) {
-  // שמירת המצב הנוכחי לפני פתיחת ספר חדש כדי למנוע בלבול במיקום
-  final tabsState = context.read<TabsBloc>().state;
-  if (tabsState.hasOpenTabs) {
-    context
-        .read<HistoryBloc>()
-        .add(CaptureStateForHistory(tabsState.currentTab!));
-  }
-
-  final historyState = context.read<HistoryBloc>().state;
-  final lastOpened = ignoreHistory
-      ? null
-      : historyState.history.firstWhereOrNull((b) => b.book.title == book.title);
-
-  // אם ignoreHistory=true או האינדקס שהועבר הוא מחושב ממעבר בין תצוגות, השתמש בו תמיד
-  // רק אם האינדקס הוא 0 (ברירת מחדל) ולא ignoreHistory, השתמש בהיסטוריה
-  final int initialIndex =
-      (ignoreHistory || index != 0) ? index : (lastOpened?.index ?? 0);
-  final List<String>? initialCommentators = lastOpened?.commentatorsToShow;
-
-  final bool shouldOpenLeftPane =
-      (Settings.getValue<bool>('key-pin-sidebar') ?? false) ||
-          (Settings.getValue<bool>('key-default-sidebar-open') ?? false);
-
-  // טעינת העדפת התצוגה השמורה לספר זה
-  final bool? savedViewMode =
-      PageShapeSettingsManager.getViewModePreference(book.title);
-
-  final tab = OpenedTab.fromBook(
-    book,
-    initialIndex,
-    searchText: searchQuery,
-    commentators: initialCommentators,
-    openLeftPane: shouldOpenLeftPane,
-    showPageShapeView: savedViewMode, // העברת העדפת התצוגה השמורה
+  final coordinator = BookOpenCoordinator(
+    tabsBloc: context.read<TabsBloc>(),
+    historyBloc: context.read<HistoryBloc>(),
+    navigationBloc: context.read<NavigationBloc>(),
   );
-  context.read<TabsBloc>().add(OpenOrFocusTab(tab));
-
-  context.read<NavigationBloc>().add(const NavigateToScreen(Screen.reading));
+  coordinator.openBook(
+    book,
+    index,
+    searchQuery,
+    ignoreHistory: ignoreHistory,
+  );
 }

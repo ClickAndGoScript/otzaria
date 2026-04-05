@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
@@ -17,14 +17,14 @@ import 'package:otzaria/plugins/bloc/plugin_system_state.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_event.dart';
 import 'package:otzaria/plugins/view/plugin_side_panel.dart';
 import 'package:otzaria/plugins/view/plugin_tab_page.dart';
-import 'package:otzaria/plugins/view/plugin_test_screen.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
 
 abstract class ToolDescriptor {
   final String toolId;
   final String label;
   final int order;
-  const ToolDescriptor({required this.toolId, required this.label, required this.order});
+  const ToolDescriptor(
+      {required this.toolId, required this.label, required this.order});
   Widget buildTab(BuildContext context);
   Widget buildPage(BuildContext context);
 }
@@ -48,7 +48,8 @@ class BuiltInToolDescriptor extends ToolDescriptor {
     if (imageIcon != null) {
       return SizedBox(
         width: 100,
-        child: Tab(text: label, icon: ImageIcon(AssetImage(imageIcon!), size: 20)),
+        child:
+            Tab(text: label, icon: ImageIcon(AssetImage(imageIcon!), size: 20)),
       );
     }
     return SizedBox(
@@ -63,32 +64,28 @@ class BuiltInToolDescriptor extends ToolDescriptor {
 
 class PluginToolDescriptor extends ToolDescriptor {
   final InstalledPlugin plugin;
-  final bool isTransient;
-  PluginToolDescriptor({required this.plugin, this.isTransient = false}) 
-      : super(toolId: plugin.pluginId, label: plugin.manifest.toolTabTitle, order: plugin.manifest.toolTabOrder);
+  PluginToolDescriptor({required this.plugin})
+      : super(
+            toolId: plugin.pluginId,
+            label: plugin.manifest.toolTabTitle,
+            order: plugin.manifest.toolTabOrder);
 
   @override
   Widget buildTab(BuildContext context) {
     return SizedBox(
       width: 100,
       child: Tab(
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(FluentIcons.puzzle_piece_24_regular, size: 16),
-            const SizedBox(width: 8),
-            Flexible(child: Text(label, overflow: TextOverflow.ellipsis, style: isTransient ? const TextStyle(fontStyle: FontStyle.italic) : null)),
-          ],
-        ),
+        text: label,
+        icon: null, // ללא אייקון — גם לתוספים זמניים
       ),
     );
   }
 
   @override
   Widget buildPage(BuildContext context) => PluginTabPage(
-    key: ValueKey(plugin.pluginId),
-    plugin: plugin,
-  );
+        key: ValueKey(plugin.pluginId),
+        plugin: plugin,
+      );
 }
 
 class MoreScreen extends StatefulWidget {
@@ -102,17 +99,26 @@ class MoreScreenState extends State<MoreScreen>
     with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   static const int _calendarFocusRetryCount = 6;
   TabController? _tabController;
-  final GlobalKey<CalendarWidgetState> _calendarKey = GlobalKey<CalendarWidgetState>();
-  final GlobalKey<GematriaSearchScreenState> _gematriaKey = GlobalKey<GematriaSearchScreenState>();
-  
+  final GlobalKey<CalendarWidgetState> _calendarKey =
+      GlobalKey<CalendarWidgetState>();
+  final GlobalKey<GematriaSearchScreenState> _gematriaKey =
+      GlobalKey<GematriaSearchScreenState>();
+
   List<ToolDescriptor> _descriptors = [];
   List<Widget> _pages = [];
   List<Widget> _tabWidgets = [];
   String? _selectedToolId;
   bool _isPanelOpen = false;
   InstalledPlugin? _transientPlugin;
+  // מונע rebuild מרובה של הטאבים כאשר הזהות המלאה של הלשוניות לא השתנתה
+  String _lastDescriptorsSignature = '';
 
-  void _requestCalendarFocus({int remainingAttempts = _calendarFocusRetryCount}) {
+  String _descriptorSignature(List<ToolDescriptor> descriptors) {
+    return descriptors.map((descriptor) => descriptor.toolId).join('|');
+  }
+
+  void _requestCalendarFocus(
+      {int remainingAttempts = _calendarFocusRetryCount}) {
     if (!mounted) return;
     final calendarState = _calendarKey.currentState;
     if (calendarState != null) {
@@ -123,13 +129,16 @@ class MoreScreenState extends State<MoreScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       Future<void>.delayed(const Duration(milliseconds: 50), () {
-        if (mounted) _requestCalendarFocus(remainingAttempts: remainingAttempts - 1);
+        if (mounted) {
+          _requestCalendarFocus(remainingAttempts: remainingAttempts - 1);
+        }
       });
     });
   }
 
   void requestActiveTabFocus() {
-    if (_tabController?.index != null && _descriptors[_tabController!.index].toolId == 'builtin.calendar') {
+    if (_tabController?.index != null &&
+        _descriptors[_tabController!.index].toolId == 'builtin.calendar') {
       _requestCalendarFocus();
     }
   }
@@ -152,7 +161,7 @@ class MoreScreenState extends State<MoreScreen>
       BuiltInToolDescriptor(
         toolId: 'builtin.calendar',
         label: 'לוח שנה',
-        icon: Icons.calendar_month_outlined,
+        icon: FluentIcons.calendar_24_regular,
         order: 10,
         pageBuilder: () => BlocBuilder<CalendarCubit, CalendarState>(
           builder: (context, _) => CalendarWidget(key: _calendarKey),
@@ -168,7 +177,7 @@ class MoreScreenState extends State<MoreScreen>
       BuiltInToolDescriptor(
         toolId: 'builtin.measurements',
         label: 'מדות ושיעורים',
-        icon: Icons.straighten,
+        icon: FluentIcons.ruler_24_regular,
         order: 30,
         pageBuilder: () => const MeasurementConverterScreen(),
       ),
@@ -193,14 +202,6 @@ class MoreScreenState extends State<MoreScreen>
         order: 60,
         pageBuilder: () => const DictionaryScreen(),
       ),
-      if (kDebugMode)
-        BuiltInToolDescriptor(
-          toolId: 'builtin.plugin_test',
-          label: 'Plugin POC (Debug)',
-          icon: FluentIcons.bug_24_regular,
-          order: 999,
-          pageBuilder: () => const PluginTestScreen(),
-        ),
     ];
   }
 
@@ -212,68 +213,91 @@ class MoreScreenState extends State<MoreScreen>
       }
       return;
     }
-    
-    setState(() {
-      _transientPlugin = plugin;
-      _selectedToolId = plugin.pluginId;
-      final blocState = context.read<PluginSystemBloc>().state;
-      if (blocState is PluginSystemLoaded) {
-        _rebuildTabs(blocState.pinnedPlugins, transient: _transientPlugin);
-      }
-    });
+    // מגדיר את הפלאגין הזמני ומיד מבצע rebuild — ללא setState נפרד
+    _transientPlugin = plugin;
+    _selectedToolId = plugin.pluginId;
+    final blocState = context.read<PluginSystemBloc>().state;
+    if (blocState is PluginSystemLoaded) {
+      _rebuildTabs(blocState.pinnedPlugins, transient: _transientPlugin);
+    }
   }
 
-  void _rebuildTabs(List<InstalledPlugin> pinnedPlugins, {InstalledPlugin? transient}) {
-    if (!mounted) return;
-
+  void _applyTabState(
+    List<InstalledPlugin> pinnedPlugins, {
+    InstalledPlugin? transient,
+    required bool notify,
+  }) {
     final newDescriptors = <ToolDescriptor>[
       ..._buildBaseDescriptors(),
       ...pinnedPlugins.map((p) => PluginToolDescriptor(plugin: p)),
     ];
     if (transient != null) {
       if (!pinnedPlugins.any((p) => p.pluginId == transient.pluginId)) {
-        newDescriptors.add(PluginToolDescriptor(plugin: transient, isTransient: true));
+        newDescriptors.add(PluginToolDescriptor(plugin: transient));
       }
     }
-    
+
     newDescriptors.sort((a, b) => a.order.compareTo(b.order));
+    final newSignature = _descriptorSignature(newDescriptors);
+    if (newSignature == _lastDescriptorsSignature && _tabController != null) {
+      return;
+    }
+    _lastDescriptorsSignature = newSignature;
 
     int newIndex = 0;
     if (_selectedToolId != null) {
       newIndex = newDescriptors.indexWhere((t) => t.toolId == _selectedToolId);
       if (newIndex == -1) newIndex = 0;
     }
-    
+
     _selectedToolId = newDescriptors[newIndex].toolId;
 
-    final newController = TabController(length: newDescriptors.length, initialIndex: newIndex, vsync: this);
+    final newController = TabController(
+        length: newDescriptors.length, initialIndex: newIndex, vsync: this);
     newController.addListener(_handleTabChange);
 
     final oldController = _tabController;
     _tabController = newController;
-    
-    // We update state inside post frame to avoid triggering updates while building
-    setState(() {
+
+    void applyState() {
       _descriptors = newDescriptors;
       _tabWidgets = newDescriptors.map((t) => t.buildTab(context)).toList();
       _pages = newDescriptors.map((t) => t.buildPage(context)).toList();
-    });
+    }
+
+    if (notify) {
+      setState(applyState);
+    } else {
+      applyState();
+    }
 
     if (oldController != null) {
       oldController.removeListener(_handleTabChange);
-      oldController.dispose();
+      // דחיית ה-dispose למסגרת הבאה — מונע dispose אגרסיבי
+      SchedulerBinding.instance
+          .addPostFrameCallback((_) => oldController.dispose());
     }
+  }
+
+  void _rebuildTabs(List<InstalledPlugin> pinnedPlugins,
+      {InstalledPlugin? transient}) {
+    if (!mounted) return;
+    _applyTabState(
+      pinnedPlugins,
+      transient: transient,
+      notify: true,
+    );
   }
 
   @override
   void initState() {
     super.initState();
-    // Default setup
-    _rebuildTabs([]);
+    _applyTabState([], notify: false);
   }
 
   void resetToCalendar() {
-    final calendarIndex = _descriptors.indexWhere((t) => t.toolId == 'builtin.calendar');
+    final calendarIndex =
+        _descriptors.indexWhere((t) => t.toolId == 'builtin.calendar');
     if (calendarIndex != -1 && _tabController?.index != calendarIndex) {
       _tabController?.animateTo(calendarIndex);
       return;
@@ -294,7 +318,9 @@ class MoreScreenState extends State<MoreScreen>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final isMoreScreenActive = context.select((NavigationBloc bloc) => bloc.state.currentScreen) == Screen.more;
+    final isMoreScreenActive =
+        context.select((NavigationBloc bloc) => bloc.state.currentScreen) ==
+            Screen.more;
 
     if (isMoreScreenActive && _selectedToolId == 'builtin.calendar') {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -310,7 +336,8 @@ class MoreScreenState extends State<MoreScreen>
           showWarningDialog(
             context: context,
             title: 'התוסף כבר קיים',
-            content: 'התוסף "${state.pluginName}" בגרסה ${state.version} כבר מותקן.',
+            content:
+                'התוסף "${state.pluginName}" בגרסה ${state.version} כבר מותקן.',
             subtitle: 'האם ברצונך להתקין מחדש ולדרוס אותו?',
             cancelText: 'ביטול',
             confirmText: 'התקן מחדש',
@@ -318,29 +345,35 @@ class MoreScreenState extends State<MoreScreen>
             if (!context.mounted) return;
             if (value == true) {
               context.read<PluginSystemBloc>().add(
-                InstallPluginRequested(state.archivePath, forceOverwrite: true),
-              );
+                    InstallPluginRequested(state.archivePath,
+                        forceOverwrite: true),
+                  );
             } else {
               context.read<PluginSystemBloc>().add(LoadPlugins());
             }
           });
         } else if (state is PluginSystemInstallRequiresPermissions) {
-          final permList = state.manifest.permissions.isEmpty 
+          final permList = state.manifest.permissions.isEmpty
               ? 'אין הרשאות מיוחדות נדרשות'
               : state.manifest.permissions.join('\n');
           showWarningDialog(
             context: context,
             title: 'אישור התקנת תוסף',
-            content: 'התוסף "${state.manifest.name}" מבקש גישה למשאבי מערכת.\n\nהרשאות נדרשות:\n$permList',
+            content:
+                'התוסף "${state.manifest.name}" מבקש גישה למשאבי מערכת.\n\nהרשאות נדרשות:\n$permList',
             subtitle: 'האם ברצונך לאשר הרשאות אלו ולהתקין את התוסף?',
             cancelText: 'ביטול',
             confirmText: 'התקן וקבל',
           ).then((value) {
             if (!context.mounted) return;
             if (value == true) {
-              context.read<PluginSystemBloc>().add(ConfirmPluginInstall(state.tempDirPath, state.manifest));
+              context
+                  .read<PluginSystemBloc>()
+                  .add(ConfirmPluginInstall(state.tempDirPath, state.manifest));
             } else {
-              context.read<PluginSystemBloc>().add(CancelPluginInstall(state.tempDirPath));
+              context
+                  .read<PluginSystemBloc>()
+                  .add(CancelPluginInstall(state.tempDirPath));
             }
           });
         }
@@ -348,21 +381,25 @@ class MoreScreenState extends State<MoreScreen>
       child: Scaffold(
         appBar: AppBar(
           toolbarHeight: 72,
-          leading: IconButton(
-            icon: const Icon(FluentIcons.puzzle_piece_24_regular),
-            onPressed: () {
-              setState(() {
-                _isPanelOpen = !_isPanelOpen;
-              });
-            },
-            tooltip: 'תוספים',
-          ),
-          title: _tabController == null ? null : TabBar(
-            controller: _tabController,
-            isScrollable: true,
-            tabAlignment: TabAlignment.center,
-            tabs: _tabWidgets,
-          ),
+          title: _tabController == null
+              ? null
+              : TabBar(
+                  controller: _tabController,
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.center,
+                  tabs: _tabWidgets,
+                ),
+          actions: [
+            IconButton(
+              icon: const Icon(FluentIcons.puzzle_piece_24_regular),
+              onPressed: () {
+                setState(() {
+                  _isPanelOpen = !_isPanelOpen;
+                });
+              },
+              tooltip: 'תוספים',
+            ),
+          ],
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(1.0),
             child: Container(
@@ -371,23 +408,29 @@ class MoreScreenState extends State<MoreScreen>
             ),
           ),
         ),
-        body: _tabController == null ? const Center(child: CircularProgressIndicator()) : Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (_isPanelOpen) PluginSidePanel(
-              onPluginSelected: (plugin) {
-                _openPluginTransiently(plugin);
-              },
-            ),
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                key: ValueKey(_descriptors.length), // Rebuild when count changes
-                children: _pages,
+        body: _tabController == null
+            ? const Center(child: CircularProgressIndicator())
+            : Stack(
+                children: [
+                  TabBarView(
+                    key: ValueKey(_descriptorSignature(_descriptors)),
+                    controller: _tabController,
+                    children: _pages,
+                  ),
+                  if (_isPanelOpen)
+                    Positioned(
+                      left: 0,
+                      top: 0,
+                      bottom: 0,
+                      child: PluginSidePanel(
+                        onPluginSelected: (plugin) {
+                          _openPluginTransiently(plugin);
+                          // הפאנל נשאר פתוח — המשתמש יכול להמשיך לגלוש
+                        },
+                      ),
+                    ),
+                ],
               ),
-            ),
-          ],
-        ),
       ),
     );
   }

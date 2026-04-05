@@ -18,14 +18,18 @@ class PreparedInstall {
   final PluginManifest manifest;
   final String tempDirPath;
   final bool isOverwrite;
-  
+
   PreparedInstall(this.manifest, this.tempDirPath, this.isOverwrite);
 }
 
 class PluginInstallerService {
-  final PluginRegistryRepository _repository = PluginRegistryRepository();
+  final PluginRegistryRepository _repository;
 
-  Future<PreparedInstall> prepareInstall(String archivePath, {bool forceOverwrite = false}) async {
+  PluginInstallerService({PluginRegistryRepository? repository})
+      : _repository = repository ?? PluginRegistryRepository();
+
+  Future<PreparedInstall> prepareInstall(String archivePath,
+      {bool forceOverwrite = false}) async {
     final tempDir = await Directory.systemTemp.createTemp('otz_plugin_');
     try {
       // 1. Extract zip to temp
@@ -59,37 +63,44 @@ class PluginInstallerService {
       final manifest = PluginManifest.fromJson(manifestJson);
 
       if (manifest.schemaVersion != 1) {
-         throw Exception('גרסת סכמה ${manifest.schemaVersion} של התוסף אינה נתמכת במערכת זו');
+        throw Exception(
+            'גרסת סכמה ${manifest.schemaVersion} של התוסף אינה נתמכת במערכת זו');
       }
 
       if (!RegExp(r'^[a-z0-9_.-]+$').hasMatch(manifest.id)) {
-        throw Exception('מזהה התוסף אינו תקין. מותר להשתמש רק באותיות קטנות באנגלית, מספרים, נקודות, קווים תחתונים ומינוסים.');
+        throw Exception(
+            'מזהה התוסף אינו תקין. מותר להשתמש רק באותיות קטנות באנגלית, מספרים, נקודות, קווים תחתונים ומינוסים.');
       }
-      
+
       if (!RegExp(r'^\d+\.\d+\.\d+(?:\+.*)?$').hasMatch(manifest.version)) {
-         throw Exception('גרסת התוסף במניפסט אינה חוקית. נדרש פורמט SemVer חוקיות (לדוגמה 1.0.0).');
+        throw Exception(
+            'גרסת התוסף במניפסט אינה חוקית. נדרש פורמט SemVer חוקיות (לדוגמה 1.0.0).');
       }
 
       bool isOverwrite = false;
       final existingPlugin = await _repository.getPlugin(manifest.id);
       if (existingPlugin != null) {
-         final diff = _compareVersionsStrict(manifest.version, existingPlugin.version);
-         if (diff < 0) {
-           throw Exception('לא ניתן להתקין גרסה ${manifest.version} על פני גרסה חדישה יותר ${existingPlugin.version}. מחיקה נדרשת קודם.');
-         } else if (diff == 0 && !forceOverwrite) {
-           throw PluginOverwriteException(manifest.name, manifest.version);
-         }
-         isOverwrite = true;
+        final diff =
+            _compareVersionsStrict(manifest.version, existingPlugin.version);
+        if (diff < 0) {
+          throw Exception(
+              'לא ניתן להתקין גרסה ${manifest.version} על פני גרסה חדישה יותר ${existingPlugin.version}. מחיקה נדרשת קודם.');
+        } else if (diff == 0 && !forceOverwrite) {
+          throw PluginOverwriteException(manifest.name, manifest.version);
+        }
+        isOverwrite = true;
       }
 
       final packageInfo = await PackageInfo.fromPlatform();
       final appVersion = packageInfo.version;
       if (_compareVersionsStrict(appVersion, manifest.minAppVersion) < 0) {
-        throw Exception('התוסף דורש אוצריא בגרסה ${manifest.minAppVersion} לפחות, אך מותקנת $appVersion');
+        throw Exception(
+            'התוסף דורש אוצריא בגרסה ${manifest.minAppVersion} לפחות, אך מותקנת $appVersion');
       }
       if (manifest.maxAppVersion != null &&
           _compareVersionsStrict(appVersion, manifest.maxAppVersion!) > 0) {
-        throw Exception('התוסף מיועד לאוצריא עד גרסה ${manifest.maxAppVersion} בלבד, אך מותקנת $appVersion');
+        throw Exception(
+            'התוסף מיועד לאוצריא עד גרסה ${manifest.maxAppVersion} בלבד, אך מותקנת $appVersion');
       }
 
       const validPermissions = [
@@ -118,20 +129,21 @@ class PluginInstallerService {
       ];
       for (final perm in manifest.permissions) {
         if (!validPermissions.contains(perm)) {
-           throw Exception('הרשאה לא חוקית שנדרשת על ידי התוסף: $perm');
+          throw Exception('הרשאה לא חוקית שנדרשת על ידי התוסף: $perm');
         }
       }
 
-      final entrypointPath = p.normalize(p.join(tempDir.path, manifest.entrypoint));
+      final entrypointPath =
+          p.normalize(p.join(tempDir.path, manifest.entrypoint));
       if (!p.isWithin(tempDir.path, entrypointPath)) {
-        throw Exception('נתיב קובץ הכניסה ${manifest.entrypoint} חורג מגבולות חבילת התוסף');
+        throw Exception(
+            'נתיב קובץ הכניסה ${manifest.entrypoint} חורג מגבולות חבילת התוסף');
       }
       if (!File(entrypointPath).existsSync()) {
         throw Exception('קובץ הכניסה ${manifest.entrypoint} לא נמצא בחבילה');
       }
 
       return PreparedInstall(manifest, tempDir.path, isOverwrite);
-
     } catch (e) {
       if (await tempDir.exists()) {
         await tempDir.delete(recursive: true);
@@ -140,7 +152,8 @@ class PluginInstallerService {
     }
   }
 
-  Future<void> finalizeInstall(String tempDirPath, PluginManifest manifest) async {
+  Future<void> finalizeInstall(
+      String tempDirPath, PluginManifest manifest) async {
     final tempDir = Directory(tempDirPath);
     try {
       final existingPlugin = await _repository.getPlugin(manifest.id);
@@ -195,7 +208,6 @@ class PluginInstallerService {
         if (existingGrants.containsKey(perm)) continue;
         await _repository.setPermission(manifest.id, perm, true);
       }
-
     } finally {
       if (await tempDir.exists()) {
         await tempDir.delete(recursive: true);
@@ -213,7 +225,8 @@ class PluginInstallerService {
   Future<void> _copyDirectory(Directory source, Directory destination) async {
     await for (var entity in source.list(recursive: false)) {
       if (entity is Directory) {
-        var newDirectory = Directory(p.join(destination.path, p.basename(entity.path)));
+        var newDirectory =
+            Directory(p.join(destination.path, p.basename(entity.path)));
         await newDirectory.create(recursive: true);
         await _copyDirectory(entity.absolute, newDirectory);
       } else if (entity is File) {

@@ -1,8 +1,13 @@
 import 'package:otzaria/plugins/models/installed_plugin.dart';
+import 'package:otzaria/plugins/models/plugin_permission_grant.dart';
+import 'package:otzaria/plugins/models/plugin_published_record.dart';
 import 'package:otzaria/plugins/storage/plugin_system_database.dart';
 
 class PluginRegistryRepository {
-  final PluginSystemDatabase _db = PluginSystemDatabase.instance;
+  final PluginSystemDatabase _db;
+
+  PluginRegistryRepository({PluginSystemDatabase? database})
+      : _db = database ?? PluginSystemDatabase.instance;
 
   Future<List<InstalledPlugin>> getAllPlugins() async {
     return _db.getAllInstalledPlugins();
@@ -24,7 +29,8 @@ class PluginRegistryRepository {
     await _db.updatePluginPinState(pluginId, pinned);
   }
 
-  Future<void> setPermission(String pluginId, String permission, bool granted) async {
+  Future<void> setPermission(
+      String pluginId, String permission, bool granted) async {
     await _db.setPermission(pluginId, permission, granted);
   }
 
@@ -32,7 +38,13 @@ class PluginRegistryRepository {
     return _db.getPermission(pluginId, permission);
   }
 
-  Future<void> setKV(String pluginId, String namespace, String key, String valueJson) async {
+  Future<List<PluginPermissionGrant>> getPluginPermissions(
+      String pluginId) async {
+    return _db.getPluginPermissions(pluginId);
+  }
+
+  Future<void> setKV(
+      String pluginId, String namespace, String key, String valueJson) async {
     await _db.setPluginKV(pluginId, namespace, key, valueJson);
   }
 
@@ -40,12 +52,28 @@ class PluginRegistryRepository {
     return _db.getPluginKV(pluginId, namespace, key);
   }
 
-  Future<void> publishRecord(String pluginId, String type, String scope, String recordKey, String payloadJson, String? expiresAt) async {
-    await _db.publishRecord(pluginId, type, scope, recordKey, payloadJson, expiresAt);
+  Future<void> removeKV(String pluginId, String namespace, String key) async {
+    await _db.removePluginKV(pluginId, namespace, key);
   }
 
-  Future<void> unpublishRecord(String pluginId, String type, String scope, String recordKey) async {
+  Future<List<String>> listKVKeys(String pluginId, String namespace) async {
+    return _db.listPluginKVKeys(pluginId, namespace);
+  }
+
+  Future<void> publishRecord(String pluginId, String type, String scope,
+      String recordKey, String payloadJson, String? expiresAt) async {
+    await _db.publishRecord(
+        pluginId, type, scope, recordKey, payloadJson, expiresAt);
+  }
+
+  Future<void> unpublishRecord(
+      String pluginId, String type, String scope, String recordKey) async {
     await _db.unpublishRecord(pluginId, type, scope, recordKey);
+  }
+
+  Future<List<PluginPublishedRecord>> getPluginPublishedRecords(
+      String pluginId) async {
+    return _db.getPluginPublishedRecords(pluginId);
   }
 
   Future<List<String>> getPublishedRecordsByType(String type) async {
