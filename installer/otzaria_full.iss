@@ -102,6 +102,14 @@ Root: HKA; Subkey: "Software\Classes\otzaria"; ValueType: string; ValueName: "";
 Root: HKA; Subkey: "Software\Classes\otzaria"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""; Flags: uninsdeletevalue; Check: not IsPortableInstall
 Root: HKA; Subkey: "Software\Classes\otzaria\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#MyAppExeName}"; Flags: uninsdeletekeyifempty; Check: not IsPortableInstall
 Root: HKA; Subkey: "Software\Classes\otzaria\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekeyifempty; Check: not IsPortableInstall
+; "פרוטוקול מהימן" באופיס — מונע את אזהרת האבטחה בלחיצה על קישור otzaria://
+; במסמך. ההגדרה היא פר-משתמש, ולכן האפליקציה יוצרת את המפתחות בכל הפעלה
+; (PluginProtocolRegistrationService) ולא המתקין; כאן רק ההסרה כדי שלא יישארו
+; שאריות. 12.0=2007, 14.0=2010, 15.0=2013, 16.0=2016 ואילך.
+Root: HKCU; Subkey: "Software\Policies\Microsoft\Office\12.0\Common\Security\Trusted Protocols\All Applications\otzaria:"; Flags: dontcreatekey uninsdeletekey; Check: not IsPortableInstall
+Root: HKCU; Subkey: "Software\Policies\Microsoft\Office\14.0\Common\Security\Trusted Protocols\All Applications\otzaria:"; Flags: dontcreatekey uninsdeletekey; Check: not IsPortableInstall
+Root: HKCU; Subkey: "Software\Policies\Microsoft\Office\15.0\Common\Security\Trusted Protocols\All Applications\otzaria:"; Flags: dontcreatekey uninsdeletekey; Check: not IsPortableInstall
+Root: HKCU; Subkey: "Software\Policies\Microsoft\Office\16.0\Common\Security\Trusted Protocols\All Applications\otzaria:"; Flags: dontcreatekey uninsdeletekey; Check: not IsPortableInstall
 ; הוספת {app} ל-PATH אוטומטית (מאפשר ‎`otzaria pack-plugin`‎ מהטרמינל):
 ; התקנת מנהל → PATH המערכתי; התקנת משתמש → PATH של המשתמש. ה-Check מונע
 ; כפילויות בהתקנה חוזרת; ההסרה מתבצעת ב-CurUninstallStepChanged (לא ניתן

@@ -19,6 +19,10 @@ class PluginProtocolRegistrationService {
   static const String pluginFileProgId = 'OtzariaPluginFile';
   static const String pluginMimeType = 'application/x-otzaria-plugin';
 
+  /// גרסאות Office שעבורן נרשם `otzaria:` כפרוטוקול מהימן:
+  /// 12.0=2007, 14.0=2010, 15.0=2013, 16.0=2016 ואילך (כולל Microsoft 365).
+  static const List<String> officeVersions = ['12.0', '14.0', '15.0', '16.0'];
+
   Future<void> ensureRegistered() async {
     // במצב נייד אין לרשום שיוכים מערכתיים: הרישום מצביע על נתיב EXE
     // שעלול להיעלם (דיסק-און-קי), ומשאיר שאריות ברגיסטרי/desktop של כל
@@ -52,7 +56,21 @@ class PluginProtocolRegistrationService {
         key.close();
       }
     }
+
+    // המפתחות עצמם הם הסימון — אופיס בודק רק את קיומם, בלי ערך בתוכם.
+    for (final subkey in buildOfficeTrustedProtocolKeys()) {
+      CURRENT_USER.create(subkey).close();
+    }
   }
+
+  /// מפתחות "פרוטוקול מהימן" של אופיס (יחסית ל-HKCU), שמונעים את אזהרת
+  /// האבטחה בלחיצה על קישור `otzaria://` מתוך מסמך (issue #1167).
+  @visibleForTesting
+  static List<String> buildOfficeTrustedProtocolKeys() => [
+    for (final version in officeVersions)
+      'Software\\Policies\\Microsoft\\Office\\$version\\Common\\Security\\'
+          'Trusted Protocols\\All Applications\\$scheme:',
+  ];
 
   Future<void> _ensureLinuxRegistration() async {
     final home = Platform.environment['HOME'] ?? '';
