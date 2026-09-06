@@ -8,6 +8,7 @@ Widget _buildWidget({
   VoidCallback? onBack,
   VoidCallback? onHome,
   VoidCallback? onOpenSearch,
+  VoidCallback? onSearchWholeLibrary,
   bool showSearchElsewhereHint = false,
 }) {
   return MaterialApp(
@@ -17,6 +18,7 @@ Widget _buildWidget({
         onBack: onBack ?? () {},
         onHome: onHome ?? () {},
         onOpenSearch: onOpenSearch ?? () {},
+        onSearchWholeLibrary: onSearchWholeLibrary,
         showSearchElsewhereHint: showSearchElsewhereHint,
       ),
     ),
@@ -98,6 +100,62 @@ void main() {
         expect(find.text('ניתן לנסות לחפש בתיקייה אחרת'), findsOneWidget);
       },
     );
+
+    // לחצן "חפש בתיקייה הראשית" (issue #1118) — מוצג רק עם הרמז ועם callback
+    testWidgets('לא מציג לחצן "חפש בתיקייה הראשית" כברירת מחדל', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_buildWidget(onSearchWholeLibrary: () {}));
+      expect(find.text('חפש בתיקייה הראשית'), findsNothing);
+    });
+
+    testWidgets('לא מציג את הלחצן כשהרמז מוצג אך אין callback', (tester) async {
+      await tester.pumpWidget(_buildWidget(showSearchElsewhereHint: true));
+      expect(find.text('חפש בתיקייה הראשית'), findsNothing);
+    });
+
+    testWidgets('מציג את הלחצן כשהרמז מוצג ויש callback', (tester) async {
+      await tester.pumpWidget(
+        _buildWidget(
+          showSearchElsewhereHint: true,
+          onSearchWholeLibrary: () {},
+        ),
+      );
+      expect(find.text('חפש בתיקייה הראשית'), findsOneWidget);
+      expect(find.byIcon(FluentIcons.library_24_regular), findsOneWidget);
+    });
+
+    testWidgets('לחיצה על "חפש בתיקייה הראשית" קוראת ל-onSearchWholeLibrary', (
+      tester,
+    ) async {
+      var called = false;
+      await tester.pumpWidget(
+        _buildWidget(
+          showSearchElsewhereHint: true,
+          onSearchWholeLibrary: () => called = true,
+        ),
+      );
+      await tester.tap(find.text('חפש בתיקייה הראשית'));
+      expect(called, isTrue);
+    });
+
+    testWidgets('הלחצן ממוקם מעל לחצן "פתח חיפוש טקסט"', (tester) async {
+      await tester.pumpWidget(
+        _buildWidget(
+          showSearchElsewhereHint: true,
+          onSearchWholeLibrary: () {},
+        ),
+      );
+
+      final homeY = tester.getTopLeft(find.text('בית')).dy;
+      final wholeLibraryY = tester
+          .getTopLeft(find.text('חפש בתיקייה הראשית'))
+          .dy;
+      final searchBtnY = tester.getTopLeft(find.text('פתח חיפוש טקסט')).dy;
+
+      expect(homeY, lessThan(wholeLibraryY));
+      expect(wholeLibraryY, lessThan(searchBtnY));
+    });
 
     // אייקונים
     testWidgets('מציג אייקונים מתאימים', (tester) async {

@@ -15,6 +15,7 @@ class LibraryEmptyStateWidget extends StatelessWidget {
     required this.onHome,
     required this.onOpenSearch,
     this.onOpenLink,
+    this.onSearchWholeLibrary,
     this.showSearchElsewhereHint = false,
   });
 
@@ -25,6 +26,10 @@ class LibraryEmptyStateWidget extends StatelessWidget {
 
   /// כאשר מוגדר, מוצג מצב "קישור ישיר" עם לחצן פתיחת קישור.
   final VoidCallback? onOpenLink;
+
+  /// מריץ את אותו טקסט חיפוש מחדש בשורש הספרייה.
+  /// מוצג כלחצן רק יחד עם [showSearchElsewhereHint].
+  final VoidCallback? onSearchWholeLibrary;
 
   /// האם להציג את הרמז "ניתן לנסות לחפש בתיקייה אחרת".
   /// מוצג רק כאשר בוצע חיפוש ללא תוצאות בתוך תת-תיקייה.
@@ -94,6 +99,14 @@ class LibraryEmptyStateWidget extends StatelessWidget {
             ],
             const SizedBox(height: 16),
             _buildNavButtons(),
+            if (showSearchElsewhereHint && onSearchWholeLibrary != null) ...[
+              const SizedBox(height: 12),
+              ActionButton.recommended(
+                onPressed: onSearchWholeLibrary,
+                icon: FluentIcons.library_24_regular,
+                text: 'חפש בתיקייה הראשית',
+              ),
+            ],
             const SizedBox(height: 12),
             Text(
               'ניתן לחפש גם טקסט ספציפי במאגר',
