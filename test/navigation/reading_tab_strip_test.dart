@@ -64,6 +64,7 @@ void main() {
                 child: ReadingTabStrip(
                   stripColor: const Color(0xFFF2EBE0),
                   tabs: tabs,
+                  activeTabIndex: 0,
                   widths: widths,
                   requireLongPressToDrag: requireLongPress,
                   onReorder: log.reorder,
@@ -482,6 +483,7 @@ void main() {
                     scrollable: true,
                     crossExtent: 200,
                     tabs: tabs,
+                    activeTabIndex: 0,
                     widths: [for (final _ in tabs) itemHeight],
                     onReorder: log.reorder,
                     onDragStarted: (_, _) => log.dragStarts++,

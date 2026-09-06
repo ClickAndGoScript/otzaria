@@ -610,6 +610,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     final tabStrip = ReadingTabStrip(
       stripColor: AppSurfaces.readerBackground(context),
       tabs: state.tabs,
+      activeTabIndex: state.currentTabIndex,
       widths: [
         for (var i = 0; i < state.tabs.length; i++)
           i == state.currentTabIndex
