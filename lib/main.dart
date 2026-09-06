@@ -722,9 +722,10 @@ Future<void> _initializeProcessSingletons() async {
   }
 }
 
-/// משחזר עדכון ספרייה שנקטע (marker+backup) לפני פתיחת ה-DB.
-Future<void> _recoverInterruptedLibraryUpdate() {
-  return StartupRecoveryCheck(
+/// משחזר עדכון ספרייה שנקטע (marker+backup) לפני פתיחת ה-DB. אימות
+/// `quick_check` אחרי דלתא שנקטע (דקות על ספרייה מלאה) נדחה לאחרי החשיפה.
+Future<void> _recoverInterruptedLibraryUpdate() async {
+  final check = StartupRecoveryCheck(
     readPref: Settings.getValue<String>,
     writePref: (key, value) => Settings.setValue(key, value),
     logError: (title, message) => _appendUnhandledErrorToLocalLog(
@@ -732,7 +733,39 @@ Future<void> _recoverInterruptedLibraryUpdate() {
       error: message,
       details: const {'Phase': 'initialize', 'Component': 'Library recovery'},
     ),
-  ).run(DatabaseConstants.getDatabasePath());
+  );
+  await check.run(DatabaseConstants.getDatabasePath());
+  if (check.hasPendingVerification) {
+    final completer = _startupRecoveryVerification = Completer<void>();
+    unawaited(_runDeferredRecoveryVerification(check, completer));
+  }
+}
+
+Completer<void>? _startupRecoveryVerification;
+
+/// מסתיים כשה-DB אומת אחרי עדכון דלתא שנקטע (או מיד, כשלא נדרש אימות).
+/// עבודות שכותבות ל-seforim.db או מחליפות אותו — סנכרון רקע, עדכון ספרייה —
+/// ממתינות לו: ה-quick_check מחזיק את הקובץ פתוח ב-isolate, ובווינדוס
+/// החלפת קובץ פתוח נכשלת.
+Future<void> get startupRecoveryVerified =>
+    _startupRecoveryVerification?.future ?? Future.value();
+
+Future<void> _runDeferredRecoveryVerification(
+  StartupRecoveryCheck check,
+  Completer<void> completer,
+) async {
+  try {
+    await _mainWindowRevealedCompleter.future.timeout(
+      const Duration(seconds: 15),
+    );
+  } on TimeoutException {
+    // ממשיכים בכל זאת — כמו חימומי המטמון.
+  }
+  try {
+    await check.verifyPending();
+  } finally {
+    completer.complete();
+  }
 }
 
 /// seforim.db שהוזז לגיבוי זמני בעדכון ספרייה שנהרג באמצע חוזר לספרייה —

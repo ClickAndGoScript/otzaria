@@ -63,7 +63,8 @@ import 'package:otzaria/update/my_update_widget.dart';
 import 'package:otzaria/tools/calendar/utils/calendar_cubit.dart';
 import 'package:otzaria/widgets/dialogs/ad_popup_dialog.dart';
 import 'package:otzaria/settings/services/safer_mode_guard.dart';
-import 'package:otzaria/main.dart' show appWindowListener, presentMainWindow;
+import 'package:otzaria/main.dart'
+    show appWindowListener, presentMainWindow, startupRecoveryVerified;
 import 'package:otzaria/core/splash_screen.dart' show SplashIcon;
 import 'package:otzaria/navigation/view/custom_title_bar.dart';
 import 'package:otzaria/navigation/view/reading_tabs_side_panel.dart';
@@ -869,6 +870,13 @@ class MainWindowScreenState extends State<MainWindowScreen>
   }
 
   void _tryStartDeferredStartupWork() {
+    // סנכרון הרקע ועדכון הספרייה כותבים ל-seforim.db — ממתינים לאימות ה-DB
+    // שנדחה מהעלייה (ראה startupRecoveryVerified).
+    unawaited(startupRecoveryVerified.then((_) => _startDeferredStartupWork()));
+  }
+
+  void _startDeferredStartupWork() {
+    if (!mounted) return;
     tryStartDeferredStartupWork(
       gate: _startupWorkGate,
       startBackgroundSync: _initializeBackgroundSync,
