@@ -73,7 +73,15 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
     IndexingWorkEvent event,
     Emitter<IndexingState> emit,
   ) async {
-    if (_rejectIndexMutationInSecondaryWindow(emit)) return;
+    // רק בקשה שהמשתמש יזם מדווחת. אירועי התחזוקה האוטומטיים (ניקוי יתומים,
+    // ספרים חדשים/שהשתנו) נשלחים בכל חלון בכל טעינת ספרייה, וההודעה עליהם
+    // קפצה בכל פתיחת חלון משני.
+    if (_rejectIndexMutationInSecondaryWindow(
+      emit,
+      notify: event is StartIndexing,
+    )) {
+      return;
+    }
 
     _isFinalizing = false;
     _finalizingProgress = null;
@@ -482,10 +490,17 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
     emit(IndexingInitial());
   }
 
-  bool _rejectIndexMutationInSecondaryWindow(Emitter<IndexingState> emit) {
+  /// [notify] כבוי בעבודת רקע: אין הודעה, וגם אין `IndexingInitial` שידרוס
+  /// את מצב האינדקס ש-[CheckIndexStatus] פלט באותה עלייה.
+  bool _rejectIndexMutationInSecondaryWindow(
+    Emitter<IndexingState> emit, {
+    bool notify = true,
+  }) {
     if (!WindowRole.isSecondary) return false;
-    UiSnack.show(WindowMessages.indexingOnlyInMainWindow);
-    emit(IndexingInitial());
+    if (notify) {
+      UiSnack.show(WindowMessages.indexingOnlyInMainWindow);
+      emit(IndexingInitial());
+    }
     return true;
   }
 
