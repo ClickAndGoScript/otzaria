@@ -442,6 +442,28 @@ void main() {
         throwsA(isNot(isA<LibraryUpdateDiskSpaceException>())),
       );
     });
+
+    test('patch מחולץ ישן נמחק לפני בדיקת המקום', () async {
+      final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+      _writeDb(dbPath, version: 1, marker: 'old');
+      final cacheDir = Directory(p.join(tmp.path, 'library_update_cache'))
+        ..createSync(recursive: true);
+      final stale = File(p.join(cacheDir.path, 'patch-v9-v10.db'))
+        ..writeAsBytesSync(List<int>.filled(2000, 0));
+      final repository = repo(
+        (_) async => DiskSpaceInfo(
+          volumeId: 'C:\\',
+          freeBytes: stale.existsSync() ? oneGb : 100 * oneGb,
+        ),
+        dbPath,
+      );
+
+      await expectLater(
+        repository.applyFullDownload(plan()),
+        throwsA(isNot(isA<LibraryUpdateDiskSpaceException>())),
+      );
+      expect(stale.existsSync(), isFalse);
+    });
   });
 
   group('applyDeltaPlan: בדיקת מקום פנוי לפני הורדת הצעד', () {

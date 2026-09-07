@@ -621,6 +621,7 @@ class LibraryUpdateRepository implements LibraryUpdateService {
       p.join(await dataRootProvider(), 'library_update_cache'),
     );
     if (!cacheDir.existsSync()) cacheDir.createSync(recursive: true);
+    _deleteStalePatchFiles(cacheDir, const []);
     final archivePath = p.join(cacheDir.path, 'seforim.db.zst');
     final sidecarPath = PatchDownloader.resumeSidecarPath(archivePath);
     // מחולץ ליד ה-DB (אותו filesystem) כדי שה-rename יהיה אטומי.
