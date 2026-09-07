@@ -61,6 +61,24 @@ class _FakeService implements LibraryUpdateService {
   }
 }
 
+/// הורדה מלאה שנעצרת על חוסר מקום — לבדיקת מיפוי השגיאה ב-BLoC.
+class _DiskFullOnFullDownloadService extends _FakeService {
+  _DiskFullOnFullDownloadService(super.plan);
+
+  @override
+  Future<void> applyFullDownload(
+    LibraryUpdatePlan plan, {
+    LibraryUpdateProgressCallback? onProgress,
+    FullDbReplacedCallback? onDbReplaced,
+    bool Function()? isCancelled,
+  }) async {
+    fullCalled = true;
+    throw const LibraryUpdateDiskSpaceException(
+      'אין מספיק מקום פנוי בכונן: נדרש ~7.5GB, פנוי 2.0GB',
+    );
+  }
+}
+
 class _FullVerifyingService extends _FakeService {
   _FullVerifyingService(super.plan);
 
@@ -270,6 +288,37 @@ class _VerifyThenCommitService implements LibraryUpdateService {
   }) async {}
 }
 
+/// מדווח התקדמות שורות בתוך שלב ה-upserts — מד ההחלה של issue #1211.
+class _UpsertProgressService extends _FakeService {
+  _UpsertProgressService(super.plan);
+
+  @override
+  Future<LibraryDeltaApplyResult> applyDeltaPlan(
+    LibraryUpdatePlan plan, {
+    LibraryUpdateProgressCallback? onProgress,
+    bool Function()? isCancelled,
+  }) async {
+    applyCalled = true;
+    onProgress?.call(
+      const LibraryUpdateProgress(
+        phase: LibraryUpdatePhase.applying,
+        stage: 'upserts',
+      ),
+    );
+    for (final fraction in [0.25, 1.0]) {
+      onProgress?.call(
+        LibraryUpdateProgress(
+          phase: LibraryUpdatePhase.applying,
+          stage: 'upserts',
+          applyProgress: fraction,
+        ),
+      );
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    return const LibraryDeltaApplyResult(appliedSteps: 1);
+  }
+}
+
 /// שירות שבו applyDeltaPlan נחסם עד שמשחררים את ה-gate — לבדיקת race של ביטול.
 class _GatedService implements LibraryUpdateService {
   final LibraryUpdatePlan plan;
@@ -428,6 +477,24 @@ void main() {
     ),
     fullDbReleaseTag: 'v3',
   );
+  final heavyDeltaWithFullPlan = LibraryUpdatePlan.delta(
+    localVersion: 23,
+    targetVersion: 27,
+    steps: const [],
+    fullDbAsset: const ReleaseAsset(
+      name: 'seforim.db.zst',
+      downloadUrl: 'https://x',
+      size: 1500000000,
+    ),
+    fullDbReleaseTag: 'v27',
+    heavyDeltaReason: 'מסלול הדלתא פורס 3.0GB לעומת DB מקומי בגודל 5.5GB',
+  );
+  final heavyDeltaWithoutFullPlan = LibraryUpdatePlan.delta(
+    localVersion: 23,
+    targetVersion: 27,
+    steps: const [],
+    heavyDeltaReason: 'מסלול הדלתא פורס 3.0GB לעומת DB מקומי בגודל 5.5GB',
+  );
   final blockedPlan = LibraryUpdatePlan.blocked(
     localVersion: 1,
     targetVersion: 3,
@@ -516,6 +583,144 @@ void main() {
             .having((s) => s.hasUpdate, 'hasUpdate', true),
       ],
     );
+
+    blocTest<LibraryUpdateBloc, LibraryUpdateState>(
+      'דלתא כבדה עם DB מלא זמין → needsRouteChoice, בלי להריץ apply',
+      build: () => _bloc(_FakeService(heavyDeltaWithFullPlan)),
+      act: (b) => b.add(const StartLibraryUpdate()),
+      verify: (b) =>
+          expect((b.repository as _FakeService).applyCalled, isFalse),
+      expect: () => [
+        isA<LibraryUpdateState>().having(
+          (s) => s.status,
+          'status',
+          LibraryUpdateStatus.checking,
+        ),
+        isA<LibraryUpdateState>()
+            .having(
+              (s) => s.status,
+              'status',
+              LibraryUpdateStatus.needsRouteChoice,
+            )
+            .having((s) => s.plan, 'plan', heavyDeltaWithFullPlan)
+            .having((s) => s.message, 'message', contains('עדכון דלתא'))
+            .having((s) => s.message, 'message', contains('הורדה מלאה')),
+      ],
+    );
+
+    blocTest<LibraryUpdateBloc, LibraryUpdateState>(
+      'ConfirmHeavyDelta → מריץ את מסלול הדלתא שנבחר',
+      build: () => _bloc(_FakeService(heavyDeltaWithFullPlan)),
+      seed: () => LibraryUpdateState(
+        status: LibraryUpdateStatus.needsRouteChoice,
+        plan: heavyDeltaWithFullPlan,
+      ),
+      act: (b) => b.add(const ConfirmHeavyDelta()),
+      verify: (b) {
+        final service = b.repository as _FakeService;
+        expect(service.applyCalled, isTrue);
+        expect(service.fullCalled, isFalse);
+      },
+      expect: () => [
+        isA<LibraryUpdateState>().having(
+          (s) => s.status,
+          'status',
+          LibraryUpdateStatus.downloading,
+        ),
+        isA<LibraryUpdateState>()
+            .having((s) => s.status, 'status', LibraryUpdateStatus.completed)
+            .having((s) => s.hasUpdate, 'hasUpdate', true),
+      ],
+    );
+
+    blocTest<LibraryUpdateBloc, LibraryUpdateState>(
+      'ConfirmFullDownload מבחירת מסלול → עובר לתוכנית ההורדה המלאה',
+      build: () => _bloc(_FakeService(heavyDeltaWithFullPlan)),
+      seed: () => LibraryUpdateState(
+        status: LibraryUpdateStatus.needsRouteChoice,
+        plan: heavyDeltaWithFullPlan,
+      ),
+      act: (b) => b.add(const ConfirmFullDownload()),
+      verify: (b) {
+        final service = b.repository as _FakeService;
+        expect(service.fullCalled, isTrue);
+        expect(service.applyCalled, isFalse);
+      },
+      expect: () => [
+        isA<LibraryUpdateState>()
+            .having((s) => s.status, 'status', LibraryUpdateStatus.downloading)
+            .having(
+              (s) => s.plan?.kind,
+              'plan.kind',
+              LibraryUpdatePlanKind.fullDownload,
+            ),
+        isA<LibraryUpdateState>()
+            .having((s) => s.status, 'status', LibraryUpdateStatus.completed)
+            .having((s) => s.isFullDownloadPlan, 'isFullDownloadPlan', true),
+      ],
+    );
+
+    blocTest<LibraryUpdateBloc, LibraryUpdateState>(
+      'דלתא כבדה בלי DB מלא → רצה אוטומטית, אין ממה לבחור',
+      build: () => _bloc(_FakeService(heavyDeltaWithoutFullPlan)),
+      act: (b) => b.add(const StartLibraryUpdate()),
+      verify: (b) => expect((b.repository as _FakeService).applyCalled, isTrue),
+      expect: () => [
+        isA<LibraryUpdateState>().having(
+          (s) => s.status,
+          'status',
+          LibraryUpdateStatus.checking,
+        ),
+        isA<LibraryUpdateState>()
+            .having((s) => s.status, 'status', LibraryUpdateStatus.completed)
+            .having((s) => s.hasUpdate, 'hasUpdate', true),
+      ],
+    );
+
+    test('דלתא כבדה בלי חלופה — הודעת ההחלה נושאת את האזהרה', () async {
+      final bloc = _bloc(_UpsertProgressService(heavyDeltaWithoutFullPlan));
+      final seen = <LibraryUpdateState>[];
+      final sub = bloc.stream.listen(seen.add);
+
+      bloc.add(const StartLibraryUpdate());
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
+      expect(
+        seen.where(
+          (s) =>
+              s.status == LibraryUpdateStatus.applying &&
+              s.message ==
+                  LibraryMessages.applyStageWithHeavyDeltaNotice(
+                    'מוסיף ומעדכן רשומות',
+                  ),
+        ),
+        isNotEmpty,
+      );
+      await sub.cancel();
+      await bloc.close();
+    });
+
+    test('התקדמות שורות ב-upserts מגיעה ל-applyProgress', () async {
+      // שעון קופץ — ויסות ההתקדמות (200ms) חוסם אירועים באותו שלב.
+      var tick = DateTime(2026);
+      final bloc = _bloc(
+        _UpsertProgressService(deltaPlan),
+        now: () => tick = tick.add(const Duration(milliseconds: 250)),
+      );
+      final seen = <LibraryUpdateState>[];
+      final sub = bloc.stream.listen(seen.add);
+
+      bloc.add(const StartLibraryUpdate());
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
+      final applying = seen
+          .where((s) => s.status == LibraryUpdateStatus.applying)
+          .toList();
+      expect(applying.map((s) => s.applyProgress), [null, 0.25, 1.0]);
+      expect(applying.last.message, 'מוסיף ומעדכן רשומות');
+      await sub.cancel();
+      await bloc.close();
+    });
 
     blocTest<LibraryUpdateBloc, LibraryUpdateState>(
       'plan fullDownload → needsFullConfirmation עם plan',
@@ -794,6 +999,31 @@ void main() {
 
       expect(bloc.state.status, LibraryUpdateStatus.checking);
     });
+
+    blocTest<LibraryUpdateBloc, LibraryUpdateState>(
+      'חוסר מקום בהורדה מלאה → אותה שגיאת מקום כמו בדלתא',
+      build: () => _bloc(_DiskFullOnFullDownloadService(fullPlan)),
+      seed: () => LibraryUpdateState(
+        status: LibraryUpdateStatus.needsFullConfirmation,
+        plan: fullPlan,
+      ),
+      act: (b) => b.add(const ConfirmFullDownload()),
+      expect: () => [
+        isA<LibraryUpdateState>().having(
+          (s) => s.status,
+          'status',
+          LibraryUpdateStatus.downloading,
+        ),
+        isA<LibraryUpdateState>()
+            .having((s) => s.status, 'status', LibraryUpdateStatus.error)
+            .having(
+              (s) => s.message,
+              'message',
+              LibraryMessages.updateDiskSpaceError,
+            )
+            .having((s) => s.errorMessage, 'errorMessage', contains('7.5GB')),
+      ],
+    );
 
     blocTest<LibraryUpdateBloc, LibraryUpdateState>(
       'ConfirmFullDownload → מבצע הורדה מלאה ומסיים עם hasUpdate',
@@ -1446,6 +1676,34 @@ void main() {
               'message',
               contains('תוכן הספרייה המקומית שונה'),
             ),
+      ],
+    );
+
+    blocTest<LibraryUpdateBloc, LibraryUpdateState>(
+      'חוסר מקום בדלתא → שגיאת מקום, ולא הצעת הורדה מלאה',
+      build: () => _bloc(
+        _FakeService(
+          deltaWithFallbackPlan,
+          applyError: const LibraryUpdateDiskSpaceException(
+            'אין מספיק מקום פנוי בכונן: נדרש ~3.0GB, פנוי 1.0GB',
+          ),
+        ),
+      ),
+      act: (b) => b.add(const StartLibraryUpdate()),
+      expect: () => [
+        isA<LibraryUpdateState>().having(
+          (s) => s.status,
+          'status',
+          LibraryUpdateStatus.checking,
+        ),
+        isA<LibraryUpdateState>()
+            .having((s) => s.status, 'status', LibraryUpdateStatus.error)
+            .having(
+              (s) => s.message,
+              'message',
+              LibraryMessages.updateDiskSpaceError,
+            )
+            .having((s) => s.errorMessage, 'errorMessage', contains('3.0GB')),
       ],
     );
 

@@ -444,6 +444,138 @@ void main() {
     });
   });
 
+  group('applyDeltaPlan: בדיקת מקום פנוי לפני הורדת הצעד', () {
+    const oneGb = 1 << 30;
+
+    LibraryUpdateRepository repo(
+      Future<DiskSpaceInfo> Function(String dirPath) diskSpaceProvider,
+      String dbPath,
+    ) {
+      return LibraryUpdateRepository(
+        discovery: _unusedDiscovery(),
+        downloader: PatchDownloader(
+          httpClient: MockClient.streaming(
+            (request, bodyStream) async => throw Exception('download-started'),
+          ),
+          decompress: (b) async => b,
+        ),
+        refreshService: _NoopRefreshService(),
+        dbPathProvider: () => dbPath,
+        dataRootProvider: () async => tmp.path,
+        nowTimestamp: () => '2026-09-07T00:00:00Z',
+        diskSpaceProvider: diskSpaceProvider,
+      );
+    }
+
+    test('אותו volume בלי מקום לדחוס+מחולץ+WAL — נכשל לפני ההורדה', () async {
+      final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+      _writeDb(dbPath, version: 1, marker: 'old');
+      final repository = repo(
+        (_) async =>
+            const DiskSpaceInfo(volumeId: 'C:\\', freeBytes: 2 * oneGb),
+        dbPath,
+      );
+
+      await expectLater(
+        repository.applyDeltaPlan(
+          _deltaPlan(size: oneGb, uncompressedSize: 2 * oneGb),
+        ),
+        throwsA(
+          isA<LibraryUpdateDiskSpaceException>().having(
+            (e) => e.message,
+            'message',
+            contains('אין מספיק מקום פנוי'),
+          ),
+        ),
+      );
+    });
+
+    test('volumes נפרדים: אין מקום ל-WAL ליד ה-DB', () async {
+      final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+      _writeDb(dbPath, version: 1, marker: 'old');
+      final repository = repo(
+        (dirPath) async => dirPath.contains('library_update_cache')
+            ? const DiskSpaceInfo(volumeId: 'D:\\', freeBytes: 100 * oneGb)
+            : const DiskSpaceInfo(volumeId: 'C:\\', freeBytes: oneGb),
+        dbPath,
+      );
+
+      await expectLater(
+        repository.applyDeltaPlan(
+          _deltaPlan(size: oneGb, uncompressedSize: 2 * oneGb),
+        ),
+        throwsA(
+          isA<LibraryUpdateDiskSpaceException>().having(
+            (e) => e.message,
+            'message',
+            contains('להחלת'),
+          ),
+        ),
+      );
+    });
+
+    test('patch מחולץ קיים אינו נספר כמקום שיידרש להורדה', () async {
+      final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+      _writeDb(dbPath, version: 1, marker: 'old');
+      final cacheDir = Directory(p.join(tmp.path, 'library_update_cache'))
+        ..createSync(recursive: true);
+      File(p.join(cacheDir.path, 'patch.db')).writeAsBytesSync(
+        List<int>.filled(2000, 0),
+      );
+      final repository = repo(
+        (_) async => const DiskSpaceInfo(volumeId: 'C:\\', freeBytes: 2500),
+        dbPath,
+      );
+
+      // בלי השימוש החוזר היו נדרשים 5000 בייטים ובדיקת המקום הייתה חוסמת.
+      await expectLater(
+        repository.applyDeltaPlan(
+          _deltaPlan(size: 1000, uncompressedSize: 2000),
+        ),
+        throwsA(isNot(isA<LibraryUpdateDiskSpaceException>())),
+      );
+    });
+
+    test('patch של תוכנית אחרת נמחק גם כשהריצה נעצרת על חוסר מקום', () async {
+      final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+      _writeDb(dbPath, version: 1, marker: 'old');
+      final cacheDir = Directory(p.join(tmp.path, 'library_update_cache'))
+        ..createSync(recursive: true);
+      final stale = File(p.join(cacheDir.path, 'patch-v9-v10.db'))
+        ..writeAsBytesSync(List<int>.filled(2000, 0));
+      final repository = repo(
+        (_) async => const DiskSpaceInfo(volumeId: 'C:\\', freeBytes: 10),
+        dbPath,
+      );
+
+      // בלי הניקוי המוקדם, השריד היה תופס את המקום שחסר וחוסם כל ניסיון הבא.
+      await expectLater(
+        repository.applyDeltaPlan(
+          _deltaPlan(size: 1000, uncompressedSize: 2000),
+        ),
+        throwsA(isA<LibraryUpdateDiskSpaceException>()),
+      );
+      expect(stale.existsSync(), isFalse);
+    });
+
+    test('מקום פנוי מספיק — הבדיקה עוברת וההורדה מתחילה', () async {
+      final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+      _writeDb(dbPath, version: 1, marker: 'old');
+      final repository = repo(
+        (_) async =>
+            const DiskSpaceInfo(volumeId: 'C:\\', freeBytes: 100 * oneGb),
+        dbPath,
+      );
+
+      await expectLater(
+        repository.applyDeltaPlan(
+          _deltaPlan(size: oneGb, uncompressedSize: 2 * oneGb),
+        ),
+        throwsA(isNot(isA<LibraryUpdateDiskSpaceException>())),
+      );
+    });
+  });
+
   test(
     'applyDeltaPlan: ה-apply ב-isolate אינו לוכד את ה-downloader הלא-sendable',
     () async {
@@ -556,6 +688,10 @@ void main() {
         toVersion: 2,
         sourceName: 'new',
       );
+      // שריד מריצה קודמת שנקטעה — חייב להתנקות בסיום תוכנית מוצלחת.
+      final stale = File(
+        p.join(tmp.path, 'library_update_cache', 'patch-v9-v10.db'),
+      )..createSync(recursive: true);
       final refresh = _NoopRefreshService();
       final repository = LibraryUpdateRepository(
         discovery: _unusedDiscovery(),
@@ -582,9 +718,84 @@ void main() {
       expect(result.requiresFullIndexRefresh, isTrue);
       expect(refresh.called, isTrue);
       expect(const LocalDbVersionReader().read(dbPath).dbVersion, 2);
+      expect(stale.existsSync(), isFalse);
     },
     timeout: const Timeout(Duration(seconds: 30)),
   );
+
+  test(
+    'applyDeltaPlan מדווח התקדמות שורות בשלב ה-upserts',
+    () async {
+      final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+      _writeSchema4SourceDb(dbPath, version: 1, sourceName: 'old');
+      final expectedPath = p.join(tmp.path, 'expected.db');
+      _writeSchema4SourceDb(expectedPath, version: 2, sourceName: 'new');
+      final patchPath = p.join(tmp.path, 'patch-1-2.db');
+      _writeSourcePatch(
+        patchPath,
+        fromVersion: 1,
+        toVersion: 2,
+        sourceName: 'new',
+      );
+      final repository = LibraryUpdateRepository(
+        discovery: _unusedDiscovery(),
+        downloader: _PatchMapDownloader({'patch-1-2.db': patchPath}),
+        refreshService: _NoopRefreshService(),
+        dbPathProvider: () => dbPath,
+        dataRootProvider: () async => tmp.path,
+        nowTimestamp: () => '2026-09-01T00:00:00Z',
+      );
+
+      final progress = <LibraryUpdateProgress>[];
+      await repository.applyDeltaPlan(
+        _schema4DeltaPlan([
+          _schema4Edge(
+            fromVersion: 1,
+            toVersion: 2,
+            patchName: 'patch-1-2.db',
+            toHash: _logicalHash(expectedPath),
+          ),
+        ]),
+        onProgress: progress.add,
+      );
+
+      final rowProgress = progress
+          .where(
+            (e) =>
+                e.phase == LibraryUpdatePhase.applying &&
+                e.stage == 'upserts' &&
+                e.applyProgress != null,
+          )
+          .toList();
+      expect(
+        rowProgress,
+        isNotEmpty,
+        reason: 'בלי מד שורות המשתמש רואה ספינר בלתי-מוגדר לאורך כל ההחלה',
+      );
+      expect(rowProgress.every((e) => e.applyProgress! >= 0), isTrue);
+      expect(rowProgress.last.applyProgress, lessThanOrEqualTo(1.0));
+    },
+    timeout: const Timeout(Duration(seconds: 30)),
+  );
+
+  test('checkForUpdate מעביר ל-planner את גודל ה-DB המקומי', () async {
+    final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+    _writeDb(dbPath, version: 1, marker: 'old');
+    final planner = _RecordingPlanner();
+    final repository = LibraryUpdateRepository(
+      discovery: _unusedDiscovery(),
+      planner: planner,
+      downloader: _PatchMapDownloader(const {}),
+      refreshService: _NoopRefreshService(),
+      dbPathProvider: () => dbPath,
+      dataRootProvider: () async => tmp.path,
+      nowTimestamp: () => '2026-09-01T00:00:00Z',
+    );
+
+    await repository.checkForUpdate(allowPrerelease: false);
+
+    expect(planner.seenLocalDbSizeBytes, File(dbPath).lengthSync());
+  });
 
   test(
     'כשל בצעד דלתא מאוחר מדווח את הצעדים שכבר נכתבו ומרענן runtime',
@@ -1069,6 +1280,35 @@ String _journalMode(String dbPath) {
   }
 }
 
+/// לוכד את גודל ה-DB המקומי שהריפוזיטורי מעביר ל-planner.
+class _RecordingPlanner extends LibraryUpdatePlanner {
+  int? seenLocalDbSizeBytes;
+
+  @override
+  LibraryUpdatePlan plan({
+    required int localVersion,
+    required int? localSchemaVersion,
+    required bool hasLocalVersionMeta,
+    required int latestVersion,
+    required List<PatchEdge> edges,
+    ReleaseAsset? latestFullDbAsset,
+    String? latestReleaseTag,
+    int? localDbSizeBytes,
+  }) {
+    seenLocalDbSizeBytes = localDbSizeBytes;
+    return super.plan(
+      localVersion: localVersion,
+      localSchemaVersion: localSchemaVersion,
+      hasLocalVersionMeta: hasLocalVersionMeta,
+      latestVersion: latestVersion,
+      edges: edges,
+      latestFullDbAsset: latestFullDbAsset,
+      latestReleaseTag: latestReleaseTag,
+      localDbSizeBytes: localDbSizeBytes,
+    );
+  }
+}
+
 LibraryUpdateDiscovery _unusedDiscovery() {
   return LibraryUpdateDiscovery(
     client: GithubLibraryReleaseClient(
@@ -1238,6 +1478,7 @@ class _LocalPatchDownloader extends PatchDownloader {
     required String downloadUrl,
     required Directory destDir,
     void Function(int downloaded, int? total)? onProgress,
+    void Function(int bytesDone, int bytesTotal)? onVerifyProgress,
     bool Function()? isCancelled,
   }) async => patchPath;
 }
@@ -1253,6 +1494,7 @@ class _PatchMapDownloader extends PatchDownloader {
     required String downloadUrl,
     required Directory destDir,
     void Function(int downloaded, int? total)? onProgress,
+    void Function(int bytesDone, int bytesTotal)? onVerifyProgress,
     bool Function()? isCancelled,
   }) async => patchPaths[patchFile.file]!;
 }
@@ -1394,7 +1636,11 @@ String? _readSourceName(String dbPath) {
   }
 }
 
-LibraryUpdatePlan _deltaPlan() {
+LibraryUpdatePlan _deltaPlan({
+  String file = 'patch.db.zst',
+  int size = 1,
+  int uncompressedSize = 1,
+}) {
   final manifest = DeltaManifest.fromJson({
     'fromVersion': 1,
     'toVersion': 2,
@@ -1404,12 +1650,12 @@ LibraryUpdatePlan _deltaPlan() {
     'toContentHash': 'cafef00d',
     'patchFiles': [
       {
-        'file': 'patch.db.zst',
+        'file': file,
         'compression': 'zstd',
         'sha256': 'aa',
-        'size': 1,
+        'size': size,
         'uncompressedSha256': 'bb',
-        'uncompressedSize': 1,
+        'uncompressedSize': uncompressedSize,
       },
     ],
   });
@@ -1419,7 +1665,7 @@ LibraryUpdatePlan _deltaPlan() {
     steps: [
       PatchEdge(
         manifest: manifest,
-        patchFileUrls: const {'patch.db.zst': 'https://x/patch.db.zst'},
+        patchFileUrls: {file: 'https://x/$file'},
         manifestUrl: 'https://x/manifest.json',
       ),
     ],

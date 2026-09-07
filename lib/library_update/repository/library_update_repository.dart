@@ -15,6 +15,7 @@ import 'package:otzaria/data/sqlite/sqlite3_api.dart' as sqlite3;
 import 'package:seforim_library_updater/seforim_library_updater.dart';
 
 import '../services/library_runtime_refresh_service.dart';
+import '../services/streaming_patch_downloader.dart';
 
 /// שלבי תהליך העדכון — לתצוגת הודעות למשתמש.
 enum LibraryUpdatePhase {
@@ -37,7 +38,8 @@ class LibraryUpdateProgress {
   /// תת-שלב גולמי בתוך ה-apply (מ-`PatchApplier.onStage`), לתצוגה מפורטת.
   final String? stage;
 
-  /// יחס התקדמות (0..1) בתוך שלב אימות ה-hash הארוך; null בשאר שלבי ה-apply.
+  /// יחס התקדמות (0..1) בתוך שלבי ה-apply הארוכים (שורות ב-upserts/deletes,
+  /// בתים באימות ה-hash); null כשאין מדידה לשלב.
   final double? applyProgress;
 
   const LibraryUpdateProgress({
@@ -51,17 +53,21 @@ class LibraryUpdateProgress {
   });
 }
 
-typedef LibraryUpdateProgressCallback =
-    void Function(LibraryUpdateProgress progress);
+typedef LibraryUpdateProgressCallback = void Function(
+  LibraryUpdateProgress progress,
+);
 
 /// נורה סינכרונית ברגע שבו ה-DB המלא החדש כבר החליף את הישן ואין עוד נקודת
 /// ביטול בטוחה. המאזין חייב לבצע עבודה סינכרונית וקלה בלבד.
 typedef FullDbReplacedCallback = void Function();
 
-typedef FullDbExtractor =
-    Future<void> Function(String archivePath, String outputPath);
+typedef FullDbExtractor = Future<void> Function(
+  String archivePath,
+  String outputPath,
+);
 
-/// אין מספיק מקום פנוי בדיסק להורדה המלאה — נבדק לפני תחילת ההורדה.
+/// אין מספיק מקום פנוי בדיסק לעדכון (הורדה מלאה או צעד דלתא) — נבדק לפני
+/// תחילת ההורדה.
 class LibraryUpdateDiskSpaceException implements Exception {
   final String message;
   const LibraryUpdateDiskSpaceException(this.message);
@@ -188,6 +194,18 @@ class LibraryUpdateRepository implements LibraryUpdateService {
        fullDbExtractor = fullDbExtractor ?? _defaultFullDbExtractor,
        diskSpaceProvider = diskSpaceProvider ?? getDiskSpaceInfo;
 
+  /// גודל הקובץ, או null כשהוא חסר/ריק — ה-planner מתעלם מגודל לא ידוע.
+  static int? _fileSizeOrNull(String path) {
+    try {
+      final file = File(path);
+      if (!file.existsSync()) return null;
+      final size = file.lengthSync();
+      return size > 0 ? size : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Future<void> _defaultFullDbExtractor(
     String archivePath,
     String outputPath,
@@ -205,9 +223,11 @@ class LibraryUpdateRepository implements LibraryUpdateService {
   Future<LibraryUpdatePlan> checkForUpdate({
     required bool allowPrerelease,
   }) async {
-    final local = versionReader.read(dbPathProvider());
+    final dbPath = dbPathProvider();
+    final local = versionReader.read(dbPath);
     final result = await discovery.discover(allowPrerelease: allowPrerelease);
     return planner.plan(
+      localDbSizeBytes: _fileSizeOrNull(dbPath),
       localVersion: local.dbVersion,
       localSchemaVersion: local.schemaVersion,
       hasLocalVersionMeta: local.hasVersionMeta,
@@ -252,6 +272,9 @@ class LibraryUpdateRepository implements LibraryUpdateService {
 
     var result = const LibraryDeltaApplyResult();
     final steps = plan.deltaSteps;
+    // לפני בדיקת המקום: patch של תוכנית אחרת שנשאר בקאש תופס גיגה-בייטים
+    // שבלעדיהם הבדיקה תיכשל, והניקוי שבסוף לא היה מגיע לעולם.
+    _deleteStalePatchFiles(cacheDir, steps);
     try {
       for (var i = 0; i < steps.length; i++) {
         final step = steps[i];
@@ -260,6 +283,14 @@ class LibraryUpdateRepository implements LibraryUpdateService {
         if (url == null) {
           throw StateError('חסר URL להורדת ${patchFile.file}');
         }
+
+        // נבדק לכל צעד בנפרד ולא פעם אחת לכל התוכנית: ה-patch של כל צעד נמחק
+        // בסיום ההחלה שלו, ולכן שיא הצרכן הוא צעד בודד.
+        await _ensureDiskSpaceForDeltaStep(
+          cacheDir: cacheDir,
+          patchFile: patchFile,
+          dbDir: p.dirname(dbPath),
+        );
 
         onProgress?.call(
           LibraryUpdateProgress(
@@ -294,18 +325,35 @@ class LibraryUpdateRepository implements LibraryUpdateService {
               totalSteps: steps.length,
             ),
           );
+          // מד השורות מדווח בלי שם שלב; ה-onStage האחרון הוא השלב שבו הוא נמדד
+          // ('upserts' או 'deletes'), וה-BLoC גוזר ממנו את ההודעה.
+          String? currentStage;
           final stepResult = await _applyStepInQueue(
             dbPath: dbPath,
             patchPath: patchPath,
             step: step,
             verifyTotalBytesHint: verifyTotalHint,
             verifyTableBytesHint: verifyTableBytes,
-            onStage: (stage) => onProgress?.call(
+            onStage: (stage) {
+              currentStage = stage;
+              onProgress?.call(
+                LibraryUpdateProgress(
+                  phase: LibraryUpdatePhase.applying,
+                  stepIndex: i,
+                  totalSteps: steps.length,
+                  stage: stage,
+                ),
+              );
+            },
+            onApplyProgress: (rowsDone, rowsTotal) => onProgress?.call(
               LibraryUpdateProgress(
                 phase: LibraryUpdatePhase.applying,
                 stepIndex: i,
                 totalSteps: steps.length,
-                stage: stage,
+                stage: currentStage,
+                applyProgress: rowsTotal > 0
+                    ? (rowsDone / rowsTotal).clamp(0.0, 1.0)
+                    : null,
               ),
             ),
             onVerifyProgress: (done, total) {
@@ -464,6 +512,83 @@ class LibraryUpdateRepository implements LibraryUpdateService {
         );
       } catch (_) {}
       return const [];
+    }
+  }
+
+  /// מוחק patch-ים מחולצים של תוכניות אחרות שנשארו בקאש מריצה שנקטעה;
+  /// הקבצים של התוכנית הנוכחית נשמרים לשימוש חוזר.
+  void _deleteStalePatchFiles(Directory cacheDir, List<PatchEdge> steps) {
+    final planFiles = <String>{
+      for (final step in steps)
+        for (final patch in step.manifest.patchFiles)
+          extractedPatchFileName(patch.file),
+    };
+    try {
+      if (!cacheDir.existsSync()) return;
+      for (final entity in cacheDir.listSync()) {
+        if (entity is! File) continue;
+        final name = p.basename(entity.path);
+        if (!name.startsWith('patch-') || !name.endsWith('.db')) continue;
+        if (planFiles.contains(name)) continue;
+        _deleteQuietly(entity.path);
+      }
+    } catch (_) {}
+  }
+
+  /// זורק [LibraryUpdateDiskSpaceException] אם אין מקום ל-patch של הצעד:
+  /// בקאש — הדחוס והמחולץ; ליד ה-DB — ה-WAL של טרנזקציית ההחלה היחידה.
+  Future<void> _ensureDiskSpaceForDeltaStep({
+    required Directory cacheDir,
+    required PatchFileEntry patchFile,
+    required String dbDir,
+  }) async {
+    if (!cacheDir.existsSync()) cacheDir.createSync(recursive: true);
+    final extracted = File(
+      p.join(cacheDir.path, extractedPatchFileName(patchFile.file)),
+    );
+    // מחולץ בגודל הנכון ייבדק ב-hash ע"י ה-downloader וברוב המקרים ייעשה בו
+    // שימוש חוזר — אין צורך במקום להורדה ולחילוץ מחדש.
+    final reusable =
+        extracted.existsSync() &&
+        extracted.lengthSync() == patchFile.uncompressedSize;
+    int cacheNeeded = 0;
+    if (!reusable) {
+      final partial = File(p.join(cacheDir.path, patchFile.file));
+      final resumed = partial.existsSync() ? partial.lengthSync() : 0;
+      cacheNeeded =
+          (patchFile.size - resumed).clamp(0, patchFile.size) +
+          patchFile.uncompressedSize;
+    }
+    // כל דף שה-patch נוגע בו נכתב ל-WAL פעם אחת — נפח ה-patch הוא האומדן.
+    final walNeeded = patchFile.uncompressedSize;
+
+    final cacheInfo = await diskSpaceProvider(cacheDir.path);
+    final dbInfo = await diskSpaceProvider(dbDir);
+    String gb(int bytes) => (bytes / (1 << 30)).toStringAsFixed(1);
+
+    final sameVolume =
+        cacheInfo.volumeId != null && cacheInfo.volumeId == dbInfo.volumeId;
+    if (sameVolume) {
+      final needed = cacheNeeded + walNeeded;
+      if (cacheInfo.freeBytes >= 0 && cacheInfo.freeBytes < needed) {
+        throw LibraryUpdateDiskSpaceException(
+          'אין מספיק מקום פנוי בכונן: נדרש ~${gb(needed)}GB להורדת עדכון '
+          'הדלתא ולהחלתו, פנוי ${gb(cacheInfo.freeBytes)}GB',
+        );
+      }
+      return;
+    }
+    if (cacheInfo.freeBytes >= 0 && cacheInfo.freeBytes < cacheNeeded) {
+      throw LibraryUpdateDiskSpaceException(
+        'אין מספיק מקום פנוי להורדת עדכון הדלתא: נדרש ~${gb(cacheNeeded)}GB, '
+        'פנוי ${gb(cacheInfo.freeBytes)}GB',
+      );
+    }
+    if (dbInfo.freeBytes >= 0 && dbInfo.freeBytes < walNeeded) {
+      throw LibraryUpdateDiskSpaceException(
+        'אין מספיק מקום פנוי להחלת עדכון הדלתא: נדרש ~${gb(walNeeded)}GB '
+        'ליד הספרייה, פנוי ${gb(dbInfo.freeBytes)}GB',
+      );
     }
   }
 
@@ -722,6 +847,7 @@ class LibraryUpdateRepository implements LibraryUpdateService {
     Map<String, int>? verifyTableBytesHint,
     void Function(String stage)? onStage,
     void Function(int done, int total)? onVerifyProgress,
+    void Function(int rowsDone, int rowsTotal)? onApplyProgress,
   }) {
     return DatabaseLibraryProvider.operationQueue.enqueue(() async {
       // WAL מאפשר לקוראים להמשיך לקרוא את ה-snapshot שלפני העדכון בזמן
@@ -751,6 +877,7 @@ class LibraryUpdateRepository implements LibraryUpdateService {
           verifyTableBytesHint: verifyTableBytesHint,
           onStage: onStage,
           onVerifyProgress: onVerifyProgress,
+          onApplyProgress: onApplyProgress,
         );
         recovery.finishSuccess(dbPath);
         return booksTouched;
@@ -818,14 +945,18 @@ class LibraryUpdateRepository implements LibraryUpdateService {
     Map<String, int>? verifyTableBytesHint,
     void Function(String stage)? onStage,
     void Function(int done, int total)? onVerifyProgress,
+    void Function(int rowsDone, int rowsTotal)? onApplyProgress,
   }) async {
     final port = ReceivePort();
     final sub = port.listen((msg) {
-      // String=שם תת-שלב (onStage); record=(bytesHashed, total) של האימות.
+      // String=שם תת-שלב (onStage); (int,int)=בתים באימות ה-hash;
+      // ('apply',int,int)=שורות שהוחלו ב-upserts/deletes.
       if (msg is String) {
         onStage?.call(msg);
       } else if (msg is (int, int)) {
         onVerifyProgress?.call(msg.$1, msg.$2);
+      } else if (msg is (String, int, int) && msg.$1 == _applyProgressTag) {
+        onApplyProgress?.call(msg.$2, msg.$3);
       }
     });
     try {
@@ -874,6 +1005,8 @@ class LibraryUpdateRepository implements LibraryUpdateService {
         checkForeignKeys: false,
         onStage: (stage) => sendPort.send(stage),
         onVerifyProgress: (done, total) => sendPort.send((done, total)),
+        onApplyProgress: (rowsDone, rowsTotal) =>
+            sendPort.send((_applyProgressTag, rowsDone, rowsTotal)),
       ),
     );
   }
@@ -926,6 +1059,9 @@ class LibraryUpdateRepository implements LibraryUpdateService {
       ),
     );
   }
+
+  /// מבדיל את הודעות התקדמות ה-apply מהודעות אימות ה-hash באותו SendPort.
+  static const String _applyProgressTag = 'apply';
 
   // static מאותה סיבה כמו [_applyPatchInIsolate] — מונע לכידת `this`.
   static Future<void> _verifyFullDbInIsolate(

@@ -2728,6 +2728,13 @@ class MainWindowScreenState extends State<MainWindowScreen>
                 onRetry: () => context.read<LibraryUpdateBloc>().add(
                   const StartLibraryUpdate(),
                 ),
+                onChooseDelta: () => context.read<LibraryUpdateBloc>().add(
+                  const ConfirmHeavyDelta(),
+                ),
+                onChooseFullDownload: () =>
+                    context.read<LibraryUpdateBloc>().add(
+                      const ConfirmFullDownload(),
+                    ),
               );
               if (item == null) {
                 cubit.remove(kLibraryUpdateWorkStatusId);

@@ -86,6 +86,9 @@ abstract class LibraryMessages {
 
   static const String updateInstallerLaunchError = 'שגיאה בהפעלת מתקין העדכון';
 
+  static const String updateDiskSpaceError =
+      'אין מספיק מקום פנוי בדיסק לעדכון הספרייה';
+
   static const String deltaApplyFailed = 'החלת עדכון הדלתא נכשלה';
 
   static const String deltaResultMismatch =
@@ -99,4 +102,20 @@ abstract class LibraryMessages {
 
   static String fullLibraryDownloadRequired(String reason, String size) =>
       '$reason — נדרשת הורדה מלאה ($size)';
+
+  /// בחירת מסלול כשהחלת הדלתא צפויה להימשך זמן רב (issue #1211).
+  static String heavyDeltaRouteChoice({
+    required String reason,
+    required String deltaDownloadSize,
+    required String deltaApplySize,
+    required String fullDownloadSize,
+  }) =>
+      '$reason.\n'
+      'עדכון דלתא: הורדה קטנה ($deltaDownloadSize), אך פריסה של '
+      '$deltaApplySize והחלה ארוכה — עשרות דקות ומעלה. מתאים לרשת איטית.\n'
+      'הורדה מלאה: הורדה גדולה ($fullDownloadSize) והחלה מהירה — דקות.';
+
+  /// נלווה להודעת שלב ההחלה כשמסלול הדלתא כבד ואין הורדה מלאה חלופית.
+  static String applyStageWithHeavyDeltaNotice(String stageMessage) =>
+      '$stageMessage — ההחלה עשויה להימשך זמן רב';
 }

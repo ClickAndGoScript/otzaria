@@ -11,6 +11,12 @@ import 'package:otzaria/utils/file/zstd_stream_extractor.dart';
 typedef StreamingZstdExtractor =
     Future<void> Function(String archivePath, String outputPath);
 
+/// שם הקובץ המחולץ מארכיון patch — זהה למימוש הבסיסי: הסרת סיומת `.zst`.
+String extractedPatchFileName(String archiveFileName) =>
+    archiveFileName.endsWith('.zst')
+    ? archiveFileName.substring(0, archiveFileName.length - 4)
+    : '$archiveFileName.db';
+
 /// [PatchDownloader] שמוריד ומחלץ קובצי patch **בזרימה לדיסק**, במקום דרך
 /// הזיכרון.
 ///
@@ -41,16 +47,26 @@ class StreamingPatchDownloader extends PatchDownloader {
     required String downloadUrl,
     required Directory destDir,
     void Function(int downloaded, int? total)? onProgress,
+    void Function(int bytesDone, int bytesTotal)? onVerifyProgress,
     bool Function()? isCancelled,
   }) async {
     if (!destDir.existsSync()) destDir.createSync(recursive: true);
 
     final compressedPath = p.join(destDir.path, patchFile.file);
-    // שם הקובץ המחולץ — זהה למימוש הבסיסי: הסרת סיומת .zst
-    final extractedName = patchFile.file.endsWith('.zst')
-        ? patchFile.file.substring(0, patchFile.file.length - 4)
-        : '${patchFile.file}.db';
-    final extractedPath = p.join(destDir.path, extractedName);
+    final extractedPath = p.join(
+      destDir.path,
+      extractedPatchFileName(patchFile.file),
+    );
+
+    // patch מחולץ ומאומת שנשאר מריצה שנקטעה באמצע ה-apply — שימוש חוזר בו
+    // חוסך הורדה של מאות MB וחילוץ של כמה GB.
+    final reused = await _reuseExtracted(patchFile, extractedPath);
+    if (reused) {
+      onProgress?.call(patchFile.size, patchFile.size);
+      _deleteQuietly(compressedPath);
+      _deleteQuietly(PatchDownloader.resumeSidecarPath(compressedPath));
+      return extractedPath;
+    }
 
     try {
       // ה-sha256 של הדחוס הוא זהות יציבה של הנכס — מאפשר המשך הורדה שנקטעה.
@@ -102,6 +118,21 @@ class StreamingPatchDownloader extends PatchDownloader {
       }
       rethrow;
     }
+  }
+
+  /// האם [extractedPath] הוא בדיוק ה-patch המצופה. אינו תואם — נמחק.
+  static Future<bool> _reuseExtracted(
+    PatchFileEntry patchFile,
+    String extractedPath,
+  ) async {
+    final extracted = File(extractedPath);
+    if (!extracted.existsSync()) return false;
+    if (extracted.lengthSync() == patchFile.uncompressedSize) {
+      final hash = await Isolate.run(() => _sha256OfFile(extractedPath));
+      if (hash == patchFile.uncompressedSha256.toLowerCase()) return true;
+    }
+    _deleteQuietly(extractedPath);
+    return false;
   }
 
   static void _deleteQuietly(String path) {
