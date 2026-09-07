@@ -1,7 +1,7 @@
-import 'dart:isolate';
-
 import 'package:flutter/foundation.dart';
+import 'package:otzaria/data/cache/acronym_cache_data.dart';
 import 'package:otzaria/data/data_providers/sqlite_data_provider.dart';
+import 'package:otzaria/find_ref/repository/find_ref_db_isolate.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart';
 
 /// קבוצת-על ממוינת של מזהי ספרים שכינוי שלהם עלול להתאים לשאילתה.
@@ -121,40 +121,19 @@ class AcronymsCache {
     }
 
     try {
-      final db = await repository.database.database;
-      if (myGen != _generation) return; // הופסק על ידי clear()
-
-      final acrRows = db.select(
-        'SELECT bookId, term FROM book_acronym ORDER BY bookId',
-      );
-
-      // רק שליפת השורות חייבת לרוץ כאן (החיבור חי על ה-isolate הזה);
-      // הנורמליזציה ובניית האינדקס עוברות ל-isolate כדי לא להתחרות ב-UI.
-      final rawPairs = <(int, String)>[
-        for (final row in acrRows)
-          (row['bookId'] as int, (row['term'] as String?) ?? ''),
-      ];
-      final (local, bigrams) = await Isolate.run(() {
-        final result = <int, List<String>>{};
-        for (final (bookId, term) in rawPairs) {
-          if (term.isEmpty) continue;
-          final normalized = normalizeForFindRefMatch(term);
-          if (normalized.isEmpty) continue;
-          result.putIfAbsent(bookId, () => <String>[]).add(normalized);
-        }
-        return (result, _buildBigramIndex(result));
-      });
+      final data = await (await FindRefDbIsolate.instance())
+          .getBookAcronymCache();
 
       if (myGen != _generation) return;
       _acronymsByBookId
         ..clear()
-        ..addAll(local);
+        ..addAll(data.acronymsByBookId);
       _bookIdsByBigram
         ..clear()
-        ..addAll(bigrams);
+        ..addAll(data.bookIdsByBigram);
       _isLoaded = true;
       debugPrint(
-        '[AcronymsCache] Loaded ${acrRows.length} acronyms for ${_acronymsByBookId.length} books',
+        '[AcronymsCache] Loaded ${data.rowCount} acronyms for ${_acronymsByBookId.length} books',
       );
     } catch (e) {
       debugPrint('[AcronymsCache] Warmup failed: $e');
@@ -179,52 +158,19 @@ class AcronymsCache {
   /// האמיתית, כדי לבדוק את מסלול ההתאמה בלי DB.
   @visibleForTesting
   void setAcronymsForTesting(Map<int, List<String>> rawTermsByBookId) {
-    _acronymsByBookId.clear();
-    for (final entry in rawTermsByBookId.entries) {
-      final normalized = entry.value
-          .map(normalizeForFindRefMatch)
-          .where((t) => t.isNotEmpty)
-          .toList();
-      if (normalized.isNotEmpty) _acronymsByBookId[entry.key] = normalized;
-    }
+    final data = buildAcronymCacheData(
+      rawTermsByBookId.entries.expand(
+        (entry) => entry.value.map((term) => (entry.key, term)),
+      ),
+    );
+    _acronymsByBookId
+      ..clear()
+      ..addAll(data.acronymsByBookId);
     _bookIdsByBigram
       ..clear()
-      ..addAll(_buildBigramIndex(_acronymsByBookId));
+      ..addAll(data.bookIdsByBigram);
     _isLoaded = true;
   }
 }
 
 int _bigramKey(int first, int second) => (first << 16) | second;
-
-/// בונה את אינדקס הביגרמים מהמונחים המנורמלים. פונקציה top-level כדי שה-closure
-/// של ה-`Isolate.run` לא יוכל ללכוד את ה-singleton — שאינו sendable.
-///
-/// המזהים נצברים בסדר עולה כדי שכל רשימה תהיה ממוינת ([AcronymCandidateBooks]
-/// מסתמך על כך), ולכן די בהשוואה לאיבר האחרון לניכוי כפילויות.
-Map<int, Int32List> _buildBigramIndex(
-  Map<int, List<String>> acronymsByBookId,
-) {
-  final postings = <int, List<int>>{};
-  final bookIds = acronymsByBookId.keys.toList()..sort();
-  for (final bookId in bookIds) {
-    for (final term in acronymsByBookId[bookId]!) {
-      var previous = -1;
-      for (var i = 0; i < term.length; i++) {
-        final current = term.codeUnitAt(i);
-        if (previous >= 0) {
-          final list = postings[_bigramKey(previous, current)];
-          if (list == null) {
-            postings[_bigramKey(previous, current)] = <int>[bookId];
-          } else if (list.last != bookId) {
-            list.add(bookId);
-          }
-        }
-        previous = current;
-      }
-    }
-  }
-  return {
-    for (final entry in postings.entries)
-      entry.key: Int32List.fromList(entry.value),
-  };
-}

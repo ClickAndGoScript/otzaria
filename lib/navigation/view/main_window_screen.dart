@@ -3163,7 +3163,10 @@ class MainWindowScreenState extends State<MainWindowScreen>
             // וטאב תוסף פתוח נטען מאפס לדף הראשי שלו.
             _cachedReadingPage ??= KeepAlivePage(
               key: const ValueKey('page-reading'),
-              child: ReadingScreen(key: _readingScreenKey),
+              child: ReadingScreen(
+                key: _readingScreenKey,
+                onFindRefRequested: () => _handleFindRefOpen(context),
+              ),
             );
             _cachedSettingsPage ??= KeepAlivePage(
               key: const ValueKey('page-settings'),

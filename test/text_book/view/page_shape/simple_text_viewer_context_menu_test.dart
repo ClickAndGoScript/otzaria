@@ -16,6 +16,7 @@ import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/models/commentator_group.dart';
+import 'package:otzaria/text_book/text_book_repository.dart';
 import 'package:otzaria/text_book/view/page_shape/simple_text_viewer.dart';
 import 'package:otzaria/text_book/view/tabbed_commentary_panel.dart';
 import 'package:otzaria/widgets/misc/app_context_menu.dart';
@@ -176,6 +177,44 @@ void main() {
       expect(find.text('פתח את חלונית המפרשים'), findsNothing);
       expect(find.text('בחר מפרשים מרובים'), findsNothing);
       expect(find.text('הצג את כל המפרשים על פסקה זו'), findsOneWidget);
+    });
+
+    testWidgets('לחיצה ארוכה מתחילה טעינת מפרשי הפסקה', (tester) async {
+      final bloc = _RecordingTextBookBloc(
+        _loadedState(
+          availableCommentators: const ['רש"י', 'רמב"ן'],
+          activeCommentators: const ['רש"י'],
+          commentatorGroups: const [
+            CommentatorGroup(
+              title: 'ראשונים',
+              commentators: ['רש"י', 'רמב"ן'],
+            ),
+          ],
+          linksByLine: _commentaryLinks(const ['רש"י']),
+        ),
+      );
+      addTearDown(bloc.close);
+      final repository = bloc.repository as _TestTextBookRepository;
+
+      await pumpViewer(
+        tester,
+        textBookBloc: bloc,
+        viewer: SimpleTextViewer(
+          content: const ['שורה א'],
+          fontSize: 18,
+          openBookCallback: (_) {},
+          isMainText: true,
+        ),
+      );
+
+      expect(repository.requestedRanges, isEmpty);
+      await tester.longPress(find.byType(AppContextMenuRegion).first);
+      await tester.pumpAndSettle();
+
+      expect(repository.requestedRanges, [(startIndex: 0, endIndex: 0)]);
+      await tester.tap(find.text('מפרשים על פסקה זו'));
+      await tester.pumpAndSettle();
+      expect(find.text('רמב"ן'), findsOneWidget);
     });
 
     testWidgets('בחירת מפרש מסנכרנת את הקטע לשורה שנלחצה בכפתור הימני', (
@@ -461,11 +500,49 @@ TextBookLoaded _loadedState({
 
 class _RecordingTextBookBloc extends Bloc<TextBookEvent, TextBookState>
     implements TextBookBloc {
-  _RecordingTextBookBloc(super.initialState) {
+  _RecordingTextBookBloc(super.initialState)
+    : repository = _TestTextBookRepository(
+        initialState is TextBookLoaded
+            ? initialState.availableCommentators
+            : const [],
+      ) {
     on<TextBookEvent>((event, emit) => received.add(event));
   }
 
   final List<TextBookEvent> received = [];
+
+  @override
+  final TextBookRepository repository;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _TestTextBookRepository implements TextBookRepository {
+  _TestTextBookRepository(this.commentators);
+
+  final List<String> commentators;
+  final List<({int startIndex, int endIndex})> requestedRanges = [];
+
+  @override
+  Future<List<Link>> getBookLinksInRange(
+    TextBook book, {
+    required int startIndex,
+    required int endIndex,
+    Iterable<String>? targetBookTitles,
+  }) async {
+    requestedRanges.add((startIndex: startIndex, endIndex: endIndex));
+    return [
+      for (final title in commentators)
+        Link(
+          heRef: '',
+          index1: startIndex + 1,
+          path2: title,
+          index2: 1,
+          connectionType: 'commentary',
+        ),
+    ];
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

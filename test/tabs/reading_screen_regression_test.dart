@@ -619,6 +619,26 @@ void main() {
       }
     });
   });
+
+  testWidgets('כפתור איתור במסך ריק פותח את חלונית האיתור', (tester) async {
+    var findRequests = 0;
+    final tabsBloc = _FakeTabsBloc(TabsState.initial());
+    addTearDown(tabsBloc.close);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: BlocProvider<TabsBloc>.value(
+          value: tabsBloc,
+          child: ReadingScreen(onFindRefRequested: () => findRequests++),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('איתור ספר'));
+    await tester.pump();
+
+    expect(findRequests, 1);
+  });
 }
 
 class _FakeSettingsBloc extends Bloc<SettingsEvent, SettingsState>

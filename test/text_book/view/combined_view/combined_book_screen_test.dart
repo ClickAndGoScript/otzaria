@@ -16,6 +16,7 @@ import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/models/commentator_group.dart';
+import 'package:otzaria/text_book/text_book_repository.dart';
 import 'package:otzaria/text_book/utils/commentators_context_menu.dart';
 import 'package:otzaria/text_book/view/combined_view/combined_book_screen.dart';
 import 'package:otzaria/text_book/view/selection/enhanced_gesture_detector.dart';
@@ -1024,11 +1025,19 @@ TextBookLoaded _loadedState() {
 
 class _ClosedTextBookBloc extends Bloc<TextBookEvent, TextBookState>
     implements TextBookBloc {
-  _ClosedTextBookBloc(super.initialState) {
+  _ClosedTextBookBloc(super.initialState)
+    : repository = _TestTextBookRepository(
+        initialState is TextBookLoaded
+            ? initialState.availableCommentators
+            : const [],
+      ) {
     on<TextBookEvent>((event, emit) {});
   }
 
   bool addWasCalled = false;
+
+  @override
+  final TextBookRepository repository;
 
   @override
   bool get isClosed => true;
@@ -1045,11 +1054,45 @@ class _ClosedTextBookBloc extends Bloc<TextBookEvent, TextBookState>
 
 class _RecordingTextBookBloc extends Bloc<TextBookEvent, TextBookState>
     implements TextBookBloc {
-  _RecordingTextBookBloc(super.initialState) {
+  _RecordingTextBookBloc(super.initialState)
+    : repository = _TestTextBookRepository(
+        initialState is TextBookLoaded
+            ? initialState.availableCommentators
+            : const [],
+      ) {
     on<TextBookEvent>((event, emit) => received.add(event));
   }
 
   final List<TextBookEvent> received = [];
+
+  @override
+  final TextBookRepository repository;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _TestTextBookRepository implements TextBookRepository {
+  _TestTextBookRepository(this.commentators);
+
+  final List<String> commentators;
+
+  @override
+  Future<List<Link>> getBookLinksInRange(
+    TextBook book, {
+    required int startIndex,
+    required int endIndex,
+    Iterable<String>? targetBookTitles,
+  }) async => [
+    for (final title in commentators)
+      Link(
+        heRef: '',
+        index1: startIndex + 1,
+        path2: title,
+        index2: 1,
+        connectionType: 'commentary',
+      ),
+  ];
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

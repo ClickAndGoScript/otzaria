@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -9,6 +11,7 @@ import 'package:otzaria/library/bloc/library_event.dart';
 import 'package:otzaria/library/bloc/library_state.dart';
 import 'package:otzaria/library/models/library.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_bloc.dart';
+import 'package:otzaria/personal_notes/bloc/personal_notes_state.dart';
 import 'package:otzaria/personal_notes/models/personal_note.dart';
 import 'package:otzaria/personal_notes/repository/personal_notes_repository.dart';
 import 'package:otzaria/personal_notes/storage/personal_notes_database.dart';
@@ -39,6 +42,137 @@ class FakePersonalNotesRepository extends PersonalNotesRepository {
   }) async {
     return notesByBookId[bookId] ?? const [];
   }
+}
+
+class DelayedPersonalNotesRepository extends PersonalNotesRepository {
+  DelayedPersonalNotesRepository({required this.books});
+
+  final List<BookNotesInfo> books;
+  final Map<String, Completer<List<PersonalNote>>> requests = {};
+
+  @override
+  Future<List<BookNotesInfo>> listBooksWithNotes() async => books;
+
+  @override
+  Future<List<PersonalNote>> loadNotes(
+    String bookId, {
+    int? categoryId,
+  }) {
+    return requests.putIfAbsent(bookId, Completer.new).future;
+  }
+}
+
+class RefreshingDelayedPersonalNotesRepository extends PersonalNotesRepository {
+  RefreshingDelayedPersonalNotesRepository({required this.bookLists});
+
+  final List<List<BookNotesInfo>> bookLists;
+  final Map<String, List<Completer<List<PersonalNote>>>> requests = {};
+  int _listCall = 0;
+
+  @override
+  Future<List<BookNotesInfo>> listBooksWithNotes() async {
+    final index = _listCall < bookLists.length
+        ? _listCall
+        : bookLists.length - 1;
+    _listCall++;
+    return bookLists[index];
+  }
+
+  @override
+  Future<List<PersonalNote>> loadNotes(
+    String bookId, {
+    int? categoryId,
+  }) {
+    final request = Completer<List<PersonalNote>>();
+    requests.putIfAbsent(bookId, () => []).add(request);
+    return request.future;
+  }
+}
+
+class TrackingPersonalNotesBloc extends PersonalNotesBloc {
+  TrackingPersonalNotesBloc({required super.repository});
+
+  int activeStreamSubscriptions = 0;
+  int canceledStreamSubscriptions = 0;
+
+  @override
+  Stream<PersonalNotesState> get stream => _TrackingStream(
+    super.stream,
+    onListen: () => activeStreamSubscriptions++,
+    onCancel: () {
+      activeStreamSubscriptions--;
+      canceledStreamSubscriptions++;
+    },
+  );
+}
+
+class _TrackingStream<T> extends Stream<T> {
+  _TrackingStream(
+    this.source, {
+    required this.onListen,
+    required this.onCancel,
+  });
+
+  final Stream<T> source;
+  final void Function() onListen;
+  final void Function() onCancel;
+
+  @override
+  StreamSubscription<T> listen(
+    void Function(T event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) {
+    onListen();
+    return _TrackingSubscription(
+      source.listen(
+        onData,
+        onError: onError,
+        onDone: onDone,
+        cancelOnError: cancelOnError,
+      ),
+      onCancel,
+    );
+  }
+}
+
+class _TrackingSubscription<T> implements StreamSubscription<T> {
+  _TrackingSubscription(this.source, this.onCancel);
+
+  final StreamSubscription<T> source;
+  final void Function() onCancel;
+  bool _canceled = false;
+
+  @override
+  Future<void> cancel() {
+    if (!_canceled) {
+      _canceled = true;
+      onCancel();
+    }
+    return source.cancel();
+  }
+
+  @override
+  void onData(void Function(T data)? handleData) => source.onData(handleData);
+
+  @override
+  void onError(Function? handleError) => source.onError(handleError);
+
+  @override
+  void onDone(void Function()? handleDone) => source.onDone(handleDone);
+
+  @override
+  void pause([Future<void>? resumeSignal]) => source.pause(resumeSignal);
+
+  @override
+  void resume() => source.resume();
+
+  @override
+  bool get isPaused => source.isPaused;
+
+  @override
+  Future<E> asFuture<E>([E? futureValue]) => source.asFuture(futureValue);
 }
 
 void main() {
@@ -112,6 +246,233 @@ void main() {
     expect(find.text('ספר בדיקה'), findsOneWidget);
     expect(find.text('כותרת הערה'), findsOneWidget);
     expect(find.text('תוכן הערה ראשונית'), findsOneWidget);
+  });
+
+  testWidgets('טוען שני ספרים בסדר ומציג כל הערה תחת ספרה', (tester) async {
+    PersonalNote note(String id, String bookId, String content) => PersonalNote(
+      id: id,
+      bookId: bookId,
+      lineNumber: 1,
+      displayTitle: 'כותרת $bookId',
+      lastKnownLineNumber: null,
+      status: PersonalNoteStatus.located,
+      content: content,
+      contentPlain: content,
+      contentFormat: PersonalNoteContentFormat.plain,
+      createdAt: DateTime(2025, 1, 1),
+      updatedAt: DateTime(2025, 1, 2),
+    );
+
+    final repository = DelayedPersonalNotesRepository(
+      books: [
+        BookNotesInfo(
+          bookId: 'ספר א',
+          noteCount: 1,
+          lastUpdated: DateTime(2025, 1, 2),
+        ),
+        BookNotesInfo(
+          bookId: 'ספר ב',
+          noteCount: 1,
+          lastUpdated: DateTime(2025, 1, 2),
+        ),
+      ],
+    );
+    final personalNotesBloc = PersonalNotesBloc(repository: repository);
+    final settingsBloc = SettingsBloc(repository: SettingsRepository());
+    final libraryBloc = MockLibraryBloc();
+    final libraryState = LibraryState(
+      library: Library(categories: []),
+      isLoading: false,
+      currentCategory: null,
+    );
+
+    whenListen(
+      libraryBloc,
+      const Stream<LibraryState>.empty(),
+      initialState: libraryState,
+    );
+    addTearDown(personalNotesBloc.close);
+    addTearDown(settingsBloc.close);
+
+    await tester.pumpWidget(
+      MultiBlocProvider(
+        providers: [
+          BlocProvider<SettingsBloc>.value(value: settingsBloc),
+          BlocProvider<LibraryBloc>.value(value: libraryBloc),
+          BlocProvider<PersonalNotesBloc>.value(value: personalNotesBloc),
+        ],
+        child: MaterialApp(
+          navigatorKey: navigatorKey,
+          home: Scaffold(
+            body: PersonalNotesManagerScreen(repository: repository),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump();
+    expect(repository.requests.keys, contains('ספר א'));
+    expect(repository.requests.keys, isNot(contains('ספר ב')));
+
+    repository.requests['ספר א']!.complete([
+      note('note-a', 'ספר א', 'תוכן א ייחודי'),
+    ]);
+    for (var i = 0; i < 10 && repository.requests['ספר ב'] == null; i++) {
+      await tester.pump(const Duration(milliseconds: 1));
+    }
+    expect(repository.requests.keys, contains('ספר ב'));
+
+    repository.requests['ספר ב']!.complete([
+      note('note-b', 'ספר ב', 'תוכן ב ייחודי'),
+    ]);
+    await tester.pumpAndSettle();
+
+    expect(find.text('תוכן א ייחודי'), findsOneWidget);
+    expect(find.text('תוכן ב ייחודי'), findsOneWidget);
+
+    final firstBook = tester.getTopLeft(find.text('ספר א')).dy;
+    final firstNote = tester.getTopLeft(find.text('תוכן א ייחודי')).dy;
+    final secondBook = tester.getTopLeft(find.text('ספר ב')).dy;
+    final secondNote = tester.getTopLeft(find.text('תוכן ב ייחודי')).dy;
+    expect(firstBook, lessThan(firstNote));
+    expect(firstNote, lessThan(secondBook));
+    expect(secondBook, lessThan(secondNote));
+  });
+
+  testWidgets('רענון מבטל מאזין תקוע ומתחיל רצף חדש', (
+    tester,
+  ) async {
+    BookNotesInfo book(String id) => BookNotesInfo(
+      bookId: id,
+      noteCount: 0,
+      lastUpdated: DateTime(2025, 1, 2),
+    );
+
+    final repository = RefreshingDelayedPersonalNotesRepository(
+      bookLists: [
+        [book('ספר א'), book('ספר ב')],
+        [book('ספר ג')],
+      ],
+    );
+    final personalNotesBloc = TrackingPersonalNotesBloc(
+      repository: repository,
+    );
+    final settingsBloc = SettingsBloc(repository: SettingsRepository());
+    final libraryBloc = MockLibraryBloc();
+    whenListen(
+      libraryBloc,
+      const Stream<LibraryState>.empty(),
+      initialState: LibraryState(
+        library: Library(categories: []),
+        isLoading: false,
+        currentCategory: null,
+      ),
+    );
+    addTearDown(personalNotesBloc.close);
+    addTearDown(settingsBloc.close);
+    addTearDown(() {
+      for (final requests in repository.requests.values) {
+        for (final request in requests) {
+          if (!request.isCompleted) request.complete(const []);
+        }
+      }
+    });
+
+    await tester.pumpWidget(
+      MultiBlocProvider(
+        providers: [
+          BlocProvider<SettingsBloc>.value(value: settingsBloc),
+          BlocProvider<LibraryBloc>.value(value: libraryBloc),
+          BlocProvider<PersonalNotesBloc>.value(value: personalNotesBloc),
+        ],
+        child: MaterialApp(
+          navigatorKey: navigatorKey,
+          home: Scaffold(
+            body: PersonalNotesManagerScreen(repository: repository),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(repository.requests['ספר א'], hasLength(1));
+    final cancellationsBeforeRefresh =
+        personalNotesBloc.canceledStreamSubscriptions;
+
+    await tester.tap(find.byTooltip('רענן'));
+    await tester.pump();
+    await tester.pump();
+    for (var i = 0; i < 10 && repository.requests['ספר ג'] == null; i++) {
+      await tester.pump(const Duration(milliseconds: 1));
+    }
+
+    expect(repository.requests['ספר ב'], isNull);
+    expect(repository.requests['ספר ג'], hasLength(1));
+    expect(
+      personalNotesBloc.canceledStreamSubscriptions,
+      greaterThan(cancellationsBeforeRefresh),
+    );
+    repository.requests['ספר א']!.single.complete(const []);
+    repository.requests['ספר ג']!.single.complete(const []);
+  });
+
+  testWidgets('dispose מבטל מאזין לטעינה שנתקעה', (tester) async {
+    final repository = DelayedPersonalNotesRepository(
+      books: [
+        BookNotesInfo(
+          bookId: 'ספר תקוע',
+          noteCount: 0,
+          lastUpdated: DateTime(2025, 1, 2),
+        ),
+      ],
+    );
+    final personalNotesBloc = TrackingPersonalNotesBloc(
+      repository: repository,
+    );
+    final settingsBloc = SettingsBloc(repository: SettingsRepository());
+    final libraryBloc = MockLibraryBloc();
+    whenListen(
+      libraryBloc,
+      const Stream<LibraryState>.empty(),
+      initialState: LibraryState(
+        library: Library(categories: []),
+        isLoading: false,
+        currentCategory: null,
+      ),
+    );
+    addTearDown(personalNotesBloc.close);
+    addTearDown(settingsBloc.close);
+    addTearDown(() {
+      final request = repository.requests['ספר תקוע'];
+      if (request != null && !request.isCompleted) request.complete(const []);
+    });
+
+    await tester.pumpWidget(
+      MultiBlocProvider(
+        providers: [
+          BlocProvider<SettingsBloc>.value(value: settingsBloc),
+          BlocProvider<LibraryBloc>.value(value: libraryBloc),
+          BlocProvider<PersonalNotesBloc>.value(value: personalNotesBloc),
+        ],
+        child: MaterialApp(
+          navigatorKey: navigatorKey,
+          home: Scaffold(
+            body: PersonalNotesManagerScreen(repository: repository),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(repository.requests['ספר תקוע'], isNotNull);
+    expect(personalNotesBloc.activeStreamSubscriptions, greaterThan(0));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+
+    expect(personalNotesBloc.activeStreamSubscriptions, 0);
+    repository.requests['ספר תקוע']!.complete(const []);
   });
 
   group('noteWithinDateRange - סינון לפי טווח תאריכים', () {

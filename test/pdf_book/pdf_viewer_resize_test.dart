@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/pdf_book/view/pdf_book_screen.dart';
 import 'package:otzaria/widgets/layout/adaptive_side_pane.dart';
+import 'package:otzaria/widgets/navigation/nav_side_panel.dart';
 import 'package:otzaria/settings/services/per_book_settings_service.dart'
     show PdfLayoutMode;
 import 'package:pdfrx/pdfrx.dart';
@@ -244,7 +245,7 @@ void main() {
     );
   });
 
-  testWidgets('closing a wide side pane keeps the reading position', (
+  testWidgets('closing a wide right pane keeps the reading position', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(1400, 800));
@@ -255,16 +256,18 @@ void main() {
     final controller = PdfViewerController();
     var showRightPane = true;
     late ValueChanged<bool> setShowRightPane;
-
-    double? anchorDocTop;
-    Size? anchorViewSize;
+    var usesPushLayout = false;
+    final anchor = PdfPaneToggleAnchor();
 
     await tester.pumpWidget(
       StatefulBuilder(
         builder: (context, setState) {
           setShowRightPane = (value) {
-            anchorDocTop = controller.visibleRect.top;
-            anchorViewSize = controller.viewSize;
+            anchor.prepare(
+              changesReaderWidth: usesPushLayout,
+              docTop: controller.visibleRect.top,
+              viewSize: controller.viewSize,
+            );
             setState(() => showRightPane = value);
           };
           return MaterialApp(
@@ -281,6 +284,7 @@ void main() {
                   minPaneWidth: 180,
                   onClose: () => setShowRightPane(false),
                   minMainContentWidth: 500,
+                  onLayoutModeChanged: (value) => usesPushLayout = value,
                   mainContent: PdfViewer(
                     PdfDocumentRefDirect(document),
                     controller: controller,
@@ -297,21 +301,18 @@ void main() {
                           ),
                       // אותה חוליה שבמסך ה-PDF (issue #1023).
                       onViewSizeChanged: (viewSize, oldViewSize, c) {
-                        final top = anchorDocTop;
-                        final size = anchorViewSize;
-                        anchorDocTop = null;
-                        anchorViewSize = null;
-                        if (top == null ||
-                            oldViewSize != size ||
-                            oldViewSize!.width == c.viewSize.width) {
-                          return;
-                        }
+                        final anchorDocTop = anchor.consume(
+                          oldViewSize: oldViewSize,
+                          newViewSize: c.viewSize,
+                          isBookView: false,
+                        );
+                        if (anchorDocTop == null) return;
                         Future.microtask(() {
                           if (!c.isReady) return;
                           c.goTo(
                             c.calcMatrixFor(
                               pdfTopAnchoredCenter(
-                                anchorDocTop: top,
+                                anchorDocTop: anchorDocTop,
                                 currentCenter: c.centerPosition,
                                 viewSize: c.viewSize,
                                 zoom: c.currentZoom,
@@ -361,5 +362,106 @@ void main() {
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds: 200));
+  });
+
+  test('wide pane captures and restores the viewport anchor', () {
+    final anchor = PdfPaneToggleAnchor();
+    anchor.prepare(
+      changesReaderWidth: true,
+      docTop: 500,
+      viewSize: const Size(600, 800),
+    );
+
+    expect(
+      anchor.consume(
+        oldViewSize: const Size(600, 800),
+        newViewSize: const Size(900, 800),
+        isBookView: false,
+      ),
+      500,
+    );
+  });
+
+  test('overlay toggle clears an old anchor before scrolling and resize', () {
+    final anchor = PdfPaneToggleAnchor();
+    anchor.prepare(
+      changesReaderWidth: true,
+      docTop: 500,
+      viewSize: const Size(600, 800),
+    );
+
+    // פתיחת overlay אינה משנה את רוחב הקורא ולכן מבטלת את העוגן הממתין.
+    anchor.prepare(
+      changesReaderWidth: false,
+      docTop: 900,
+      viewSize: const Size(600, 800),
+    );
+
+    expect(
+      anchor.consume(
+        oldViewSize: const Size(600, 800),
+        newViewSize: const Size(900, 800),
+        isBookView: false,
+      ),
+      isNull,
+    );
+  });
+
+  testWidgets('narrow left pane reports overlay and clears an old anchor', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(450, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    var showLeftPane = true;
+    var usesPushLayout = true;
+    late ValueChanged<bool> setShowLeftPane;
+    final anchor = PdfPaneToggleAnchor()
+      ..prepare(
+        changesReaderWidth: true,
+        docTop: 500,
+        viewSize: const Size(450, 800),
+      );
+
+    await tester.pumpWidget(
+      StatefulBuilder(
+        builder: (context, setState) {
+          setShowLeftPane = (value) {
+            anchor.prepare(changesReaderWidth: usesPushLayout);
+            setState(() => showLeftPane = value);
+          };
+          return MaterialApp(
+            home: Directionality(
+              textDirection: TextDirection.rtl,
+              child: NavSidePanel(
+                isOpen: showLeftPane,
+                alignment: AlignmentDirectional.centerEnd,
+                paneContent: const SizedBox.shrink(),
+                paneWidth: 300,
+                minMainContentWidth: 200,
+                onClose: () => setShowLeftPane(false),
+                autoHandleResponsiveVisibility: false,
+                onLayoutModeChanged: (value) => usesPushLayout = value,
+                mainContent: const SizedBox.expand(),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    await tester.pump();
+
+    expect(usesPushLayout, isFalse);
+    setShowLeftPane(false);
+    await tester.pump();
+
+    expect(
+      anchor.consume(
+        oldViewSize: const Size(450, 800),
+        newViewSize: const Size(800, 800),
+        isBookView: false,
+      ),
+      isNull,
+    );
   });
 }

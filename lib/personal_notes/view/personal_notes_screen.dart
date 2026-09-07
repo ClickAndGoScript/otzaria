@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -75,6 +76,9 @@ class _PersonalNotesManagerScreenState
   String? _booksError;
   final Map<String, PersonalNotesState> _bookStates = {};
   final Map<String, bool> _expansionState = {};
+  int _notesLoadGeneration = 0;
+  StreamSubscription<PersonalNotesState>? _notesLoadSubscription;
+  Completer<void>? _notesLoadCompleter;
   // קאש ל-TOC לכל ספר, לחישוב כתובת המיקום של ההערות. נטען עצלן פעם אחת.
   final Map<String, Future<List<TocEntry>?>> _tocFutureByBook = {};
   bool _isNavigationVisible = true;
@@ -135,13 +139,54 @@ class _PersonalNotesManagerScreenState
   }
 
   void _scheduleNotesLoad(List<BookNotesInfo> books) {
+    final generation = ++_notesLoadGeneration;
+    _cancelPendingNotesLoad();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final bloc = context.read<PersonalNotesBloc>();
-      for (final book in books) {
-        bloc.add(LoadPersonalNotes(book.bookId));
-      }
+      if (!mounted || generation != _notesLoadGeneration) return;
+      unawaited(_loadNotesSequence(books, generation));
     });
+  }
+
+  void _cancelPendingNotesLoad() {
+    final subscription = _notesLoadSubscription;
+    final completer = _notesLoadCompleter;
+    _notesLoadSubscription = null;
+    _notesLoadCompleter = null;
+    if (completer != null && !completer.isCompleted) completer.complete();
+    if (subscription != null) unawaited(subscription.cancel());
+  }
+
+  Future<void> _loadNotesSequence(
+    List<BookNotesInfo> books,
+    int generation,
+  ) async {
+    if (!mounted || generation != _notesLoadGeneration) return;
+    final bloc = context.read<PersonalNotesBloc>();
+    for (final book in books) {
+      if (generation != _notesLoadGeneration) return;
+      final completer = Completer<void>();
+      void completeLoad() {
+        if (!completer.isCompleted) completer.complete();
+      }
+
+      final subscription = bloc.stream.listen(
+        (state) {
+          if (state.bookId == book.bookId && !state.isLoading) completeLoad();
+        },
+        onError: (_, _) => completeLoad(),
+        onDone: completeLoad,
+      );
+      _notesLoadSubscription = subscription;
+      _notesLoadCompleter = completer;
+      bloc.add(LoadPersonalNotes(book.bookId));
+      await completer.future;
+      if (identical(_notesLoadSubscription, subscription)) {
+        _notesLoadSubscription = null;
+        _notesLoadCompleter = null;
+      }
+      unawaited(subscription.cancel());
+      if (!mounted || generation != _notesLoadGeneration) return;
+    }
   }
 
   void _onFilterChanged(String? filter) {
@@ -244,6 +289,8 @@ class _PersonalNotesManagerScreenState
 
   @override
   void dispose() {
+    _notesLoadGeneration++;
+    _cancelPendingNotesLoad();
     _searchController.dispose();
     _searchFocusNode.dispose();
     _windowFocusNode.dispose();
@@ -297,7 +344,7 @@ class _PersonalNotesManagerScreenState
         child: BlocListener<PersonalNotesBloc, PersonalNotesState>(
           listener: (context, state) {
             // Store the state for each book and trigger rebuild
-            if (state.bookId != null) {
+            if (state.bookId != null && !state.isLoading) {
               setState(() {
                 _bookStates[state.bookId!] = state;
               });
