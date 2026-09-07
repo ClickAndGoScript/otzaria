@@ -5,6 +5,13 @@ import 'package:test/test.dart';
 void main() {
   final officialText = TextBook(id: 384, title: 'שו"ע אה"ע');
   final userText = TextBook(id: 384, title: 'ספר משתמש', isUserBook: true);
+  final userDocument = DocumentBook(
+    id: 384,
+    title: 'מסמך משתמש',
+    path: 'book.odt',
+    fileType: 'odt',
+    isUserBook: true,
+  );
   final officialPdf = PdfBook(id: 384, title: 'שו"ע אה"ע', path: 'book.pdf');
 
   test('קישור רשמי אינו נפתח כספר משתמש בעל מזהה זהה', () {
@@ -40,6 +47,18 @@ void main() {
         isPdf: false,
       ),
       same(officialText),
+    );
+  });
+
+  test('קישור למסמך משתמש נפתח את ספר המסמך', () {
+    expect(
+      resolveExternalBookLink(
+        [officialText, userDocument],
+        384,
+        isUserBook: true,
+        isPdf: false,
+      ),
+      same(userDocument),
     );
   });
 }

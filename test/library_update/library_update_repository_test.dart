@@ -778,6 +778,41 @@ void main() {
     timeout: const Timeout(Duration(seconds: 30)),
   );
 
+  test('applyDeltaPlan מעביר התקדמות אימות מה-downloader', () async {
+    final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+    _writeDb(dbPath, version: 1, marker: 'old');
+    final repository = LibraryUpdateRepository(
+      discovery: _unusedDiscovery(),
+      downloader: _LocalPatchDownloader(
+        p.join(tmp.path, 'patch.db'),
+        verifyProgress: (64, 128),
+      ),
+      refreshService: _NoopRefreshService(),
+      dbPathProvider: () => dbPath,
+      dataRootProvider: () async => tmp.path,
+      nowTimestamp: () => '2026-09-08T00:00:00Z',
+    );
+    final reports = <LibraryUpdateProgress>[];
+
+    await expectLater(
+      repository.applyDeltaPlan(_deltaPlan(), onProgress: reports.add),
+      throwsA(isA<PatchApplyException>()),
+    );
+
+    expect(
+      reports,
+      contains(
+        isA<LibraryUpdateProgress>()
+            .having((p) => p.phase, 'phase', LibraryUpdatePhase.verifying)
+            .having((p) => p.stepIndex, 'stepIndex', 0)
+            .having((p) => p.totalSteps, 'totalSteps', 1)
+            .having((p) => p.bytesDownloaded, 'bytesDownloaded', 64)
+            .having((p) => p.bytesTotal, 'bytesTotal', 128)
+            .having((p) => p.applyProgress, 'applyProgress', 0.5),
+      ),
+    );
+  });
+
   test(
     'applyDeltaPlan מחזיר את היומן ל-DELETE גם כשה-apply נכשל',
     () async {
@@ -1633,9 +1668,11 @@ class _NoopRefreshService extends LibraryRuntimeRefreshService {
 }
 
 /// downloader עם http.Client אמיתי (IOClient לא-sendable), שמחזיר patch מקומי.
-class _LocalPatchDownloader extends PatchDownloader {
-  _LocalPatchDownloader(this.patchPath) : super(decompress: (b) async => b);
+class _LocalPatchDownloader extends StreamingPatchDownloader {
+  _LocalPatchDownloader(this.patchPath, {this.verifyProgress})
+    : super(extractor: (_, _) async {});
   final String patchPath;
+  final (int, int)? verifyProgress;
 
   @override
   Future<String> downloadAndExtract({
@@ -1645,7 +1682,11 @@ class _LocalPatchDownloader extends PatchDownloader {
     void Function(int downloaded, int? total)? onProgress,
     void Function(int bytesDone, int bytesTotal)? onVerifyProgress,
     bool Function()? isCancelled,
-  }) async => patchPath;
+  }) async {
+    final progress = verifyProgress;
+    if (progress != null) onVerifyProgress?.call(progress.$1, progress.$2);
+    return patchPath;
+  }
 }
 
 class _PatchMapDownloader extends PatchDownloader {

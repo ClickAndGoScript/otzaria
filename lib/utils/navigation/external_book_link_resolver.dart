@@ -11,7 +11,9 @@ Book? resolveExternalBookLink(
   for (final book in books) {
     if (book.id == bookId &&
         book.isUserBook == isUserBook &&
-        (isPdf ? book is PdfBook : book is TextBook)) {
+        (isPdf
+            ? book is PdfBook
+            : book is TextBook || book is ConvertibleDocumentBook)) {
       return book;
     }
   }
