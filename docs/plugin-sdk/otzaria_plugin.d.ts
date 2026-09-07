@@ -1850,7 +1850,6 @@ export type OtzariaMethod =
   | 'database.describeSource'
   | 'database.query'
   | 'database.batchQuery'
-  | 'network.fetch'
   | 'network.fetchStream'
   | 'network.download'
   | 'fs.pickUserFile'

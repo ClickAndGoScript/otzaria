@@ -5948,18 +5948,6 @@ class PluginBridgeAdapter {
     PluginRpcEventSink? eventSink,
   }) async {
     switch (action) {
-      case 'fetch':
-        // TODO(0.9.98): להסיר את network.fetch לאחר מעבר התוספים ל-fetchStream.
-        final request = await _prepareNetworkRequest(args);
-        final result = await _fetchService.fetch(
-          request.uri,
-          method: request.method,
-          headers: request.headers,
-          body: request.body,
-          timeout: request.timeout,
-        );
-        return {'status': result.status, 'ok': result.ok, 'body': result.body};
-
       case 'fetchStream':
         if (args[_cancelStreamIdKey] case final String streamId) {
           return _cancelPluginNetworkFetch(streamId);

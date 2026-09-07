@@ -111,13 +111,11 @@ import 'package:otzaria/widgets/misc/app_cursors.dart';
 import 'package:otzaria/widgets/misc/restart_widget.dart';
 import 'package:otzaria/core/splash_screen.dart';
 import 'package:otzaria/plugins/services/plugin_crash_guard.dart';
-import 'package:otzaria/plugins/services/plugin_background_policy.dart';
 import 'package:otzaria/plugins/services/plugin_install_report_service.dart';
 import 'package:otzaria/plugins/services/plugin_packager_cli.dart';
 import 'package:otzaria/plugins/services/plugin_store_link_parser.dart';
 import 'package:otzaria/plugins/services/plugin_protocol_registration_service.dart';
 import 'package:otzaria/plugins/utils/plugin_dev_tools_mode.dart';
-import 'package:otzaria/plugins/view/webview_environment_holder.dart';
 import 'package:otzaria/core/sentry_event_filter.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
@@ -847,9 +845,6 @@ Future<void> _initializeRestartableRuntime() async {
   unawaited(_runDeferredProtocolRegistration());
   unawaited(_logJobObjectContainmentFailure());
   unawaited(_runDeferredDataRootWritabilityWarning());
-
-  // מסלול התאימות הישן זקוק ל-WebView מיד; החימום רץ ברקע ואינו מעכב bootstrap.
-  unawaited(_preWarmWebViewEnvironment());
 }
 
 /// כשקונטיינמנט ה-Job Object לא הוקם, תהליכי msedgewebview2.exe שורדים את
@@ -1049,38 +1044,6 @@ Future<void> _runDeferredCacheWarmups() async {
       }
     }
   }());
-}
-
-Future<void> _preWarmWebViewEnvironment() async {
-  // ⚠️ החימום נוגע בתיקיית ה-user-data המשותפת. חלון משני שפותח תוסף
-  // מאתחל את הסביבה בעצמו (`PluginTabPage` / `PluginBackgroundHost`).
-  if (kIsWeb || !Platform.isWindows || WindowRole.isSecondary) return;
-  try {
-    // תוסף דקלרטיבי נשאר עצל גם אם אושרה לו הפעלה ברקע.
-    final installed = await PluginRegistryRepository().getAllPlugins();
-    final hasStartupRunner = installed.any(usesLegacyStartupRunner);
-    if (!hasStartupRunner) {
-      if (kDebugMode) {
-        debugPrint('WebView2 pre-warm skipped: no startup plugins');
-      }
-      return;
-    }
-    // אם WebView2 Runtime אינו מותקן, אתחול הסביבה ייכשל ממילא. מדלגים כדי
-    // לא לזרוק חריגה מיותרת ולא להצמיח תהליכי Edge חלקיים.
-    if (!await WebViewEnvironmentHolder.isRuntimeAvailable()) {
-      if (kDebugMode) {
-        debugPrint('WebView2 pre-warm skipped: runtime not installed');
-      }
-      return;
-    }
-    await WebViewEnvironmentHolder.initialize();
-  } catch (error, stackTrace) {
-    _logNonFatalInitializationError(
-      'WebView2 environment pre-warm',
-      error,
-      stackTrace,
-    );
-  }
 }
 
 Future<void>? _processInitializationFuture;
