@@ -847,12 +847,16 @@ class LibraryUpdateRepository implements LibraryUpdateService {
         manifest: manifest,
         verifyTotalBytesHint: verifyTotalBytesHint,
         verifyTableBytesHint: verifyTableBytesHint,
+        // האימות החלקי הוא opt-in ב-updater: הריפוזיטורי משלים אותו במעבר
+        // read-only על deferredTables אחרי ה-commit (ראו _verifyDeferredTables).
+        enablePartialTableVerification: true,
         // verifyFromHash=false: verifyToHash אחרי ה-apply הוא הערובה האמיתית —
         // אם המקור שונה, ה-toHash ייכשל וה-transaction יתגלגל אחורה. הבדיקה
         // המקדימה רק כפילה קריאה של כל ה-DB (5.5GB) לחינם.
         verifyFromHash: false,
-        // checkForeignKeys=false: verifyToHash מאמת את כל 28 הטבלאות (וכל ה-FK
-        // שביניהן) מול ה-DB התקין, אז התאמת hash כבר שוללת הפרות FK — חוסך ~60ש.
+        // checkForeignKeys=false: התאמת ה-hash של הטבלאות שנגעו בהן ל-DB
+        // הקנוני שוללת הפרות שה-patch יצר; הטבלאות האחרות נבדקות במעבר
+        // deferred שאחרי ה-commit. כך נמנעת סריקת FK מלאה נוספת.
         checkForeignKeys: false,
         onStage: (stage) => sendPort.send(stage),
         onVerifyProgress: (done, total) => sendPort.send((done, total)),
