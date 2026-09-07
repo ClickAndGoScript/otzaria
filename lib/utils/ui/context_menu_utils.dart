@@ -187,8 +187,7 @@ class ContextMenuUtils {
       ),
     ];
 
-    // רק מזהה הספר במסד מתאים ל-otzaria://open/book/<id>; בלעדיו (למשל
-    // קישור-משתמש, שמזהיו במסד נפרד) אין קישור ישיר תקף להציע.
+    // קישור עומק דורש מזהה מסד; source=user מבחין בספרי משתמש בעלי ID חופף.
     final targetBookId = link.targetBookId;
     if (targetBookId != null) {
       entries.add(const AppContextMenuEntry.divider());
@@ -198,6 +197,7 @@ class ContextMenuUtils {
           icon: FluentIcons.link_24_regular,
           childrenBuilder: () => buildDirectLinkContextMenuEntries(
             bookId: targetBookId,
+            isUserBook: link.targetIsUserBook,
             index: link.index2 - 1,
             selectedText: savedSelectedText,
           ),

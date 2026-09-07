@@ -9,11 +9,13 @@ import 'package:otzaria/widgets/misc/app_popup_menu.dart';
 /// [AppContextMenuSubAction] עם אייקון אחיד וקריאה ל-[copyLinkToClipboard].
 List<AppContextMenuSubAction> buildDirectLinkSubmenuActions({
   required int bookId,
+  bool isUserBook = false,
   required int index,
   required String? selectedText,
 }) {
   final entries = buildDirectLinkSubmenuEntries(
     bookId: bookId,
+    isUserBook: isUserBook,
     index: index,
     selectedText: selectedText,
   );
@@ -33,11 +35,13 @@ List<AppContextMenuSubAction> buildDirectLinkSubmenuActions({
 /// ב-childrenBuilder של תפריט הקשר מלא.
 List<AppContextMenuEntry> buildDirectLinkContextMenuEntries({
   required int bookId,
+  bool isUserBook = false,
   required int index,
   required String? selectedText,
 }) =>
     buildDirectLinkSubmenuActions(
           bookId: bookId,
+          isUserBook: isUserBook,
           index: index,
           selectedText: selectedText,
         )

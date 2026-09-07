@@ -13,7 +13,6 @@ import 'package:otzaria/core/windowing/multi_window_service.dart';
 import 'package:otzaria/core/windowing/tab_drag_preview.dart';
 import 'package:otzaria/widgets/misc/rtl_icon.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:collection/collection.dart';
 import 'package:otzaria/core/error_log_file.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/core/messages/common_messages.dart';
@@ -129,6 +128,7 @@ import 'package:otzaria/plugins/view/plugin_background_host.dart';
 import 'package:otzaria/plugins/view/plugin_install_screen.dart';
 import 'package:otzaria/utils/navigation/book_open_coordinator.dart';
 import 'package:otzaria/utils/navigation/external_action_dispatcher.dart';
+import 'package:otzaria/utils/navigation/external_book_link_resolver.dart';
 import 'package:otzaria/utils/navigation/open_book.dart';
 import 'package:kosher_dart/kosher_dart.dart' show Daf;
 import 'package:otzaria/tools/calendar/helpers/calendar_date_helpers.dart'
@@ -1479,8 +1479,11 @@ class MainWindowScreenState extends State<MainWindowScreen>
   Future<bool> _openBookByExternalId(OpenBookAction action) async {
     final library = await DataRepository.instance.library;
     if (!mounted) return false;
-    final book = library.getAllBooks().firstWhereOrNull(
-      (b) => b.id == action.bookId,
+    final book = resolveExternalBookLink(
+      library.getAllBooks(),
+      action.bookId,
+      isUserBook: action.isUserBook,
+      isPdf: false,
     );
     if (book == null) {
       UiSnack.showError(LibraryMessages.bookNotFoundById(action.bookId));
@@ -1501,8 +1504,11 @@ class MainWindowScreenState extends State<MainWindowScreen>
   Future<bool> _openPdfBookByExternalId(OpenPdfBookAction action) async {
     final library = await DataRepository.instance.library;
     if (!mounted) return false;
-    final book = library.getAllBooks().firstWhereOrNull(
-      (b) => b is PdfBook && b.id == action.bookId,
+    final book = resolveExternalBookLink(
+      library.getAllBooks(),
+      action.bookId,
+      isUserBook: action.isUserBook,
+      isPdf: true,
     );
     if (book == null) {
       UiSnack.showError(LibraryMessages.pdfBookNotFoundById(action.bookId));

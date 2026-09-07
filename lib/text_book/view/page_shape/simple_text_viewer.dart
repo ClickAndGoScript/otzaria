@@ -1812,6 +1812,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
               icon: FluentIcons.link_24_regular,
               submenuBuilder: () => buildDirectLinkSubmenuActions(
                 bookId: state.book.id!,
+                isUserBook: state.book.isUserBook,
                 index: index,
                 selectedText: capturedText,
               ),
@@ -2059,6 +2060,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
             icon: FluentIcons.link_24_regular,
             childrenBuilder: () => buildDirectLinkContextMenuEntries(
               bookId: commentaryBookId,
+              isUserBook: widget.reportBook?.isUserBook ?? false,
               index: index,
               selectedText: capturedText,
             ),

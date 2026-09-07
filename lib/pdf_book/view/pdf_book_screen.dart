@@ -1937,7 +1937,12 @@ class _PdfBookScreenState extends State<PdfBookScreen>
                 if (bookId == null) {
                   UiSnack.showError(PdfMessages.directLinkUnavailableForBook);
                 } else {
-                  copyLinkToClipboard(buildPdfBookLink(bookId));
+                  copyLinkToClipboard(
+                    buildPdfBookLink(
+                      bookId,
+                      isUserBook: widget.tab.book.isUserBook,
+                    ),
+                  );
                 }
                 return KeyEventResult.handled;
               }
@@ -1950,7 +1955,13 @@ class _PdfBookScreenState extends State<PdfBookScreen>
                   final page =
                       widget.tab.pdfViewerController.pageNumber ??
                       widget.tab.pageNumber;
-                  copyLinkToClipboard(buildPdfPageLink(bookId, page));
+                  copyLinkToClipboard(
+                    buildPdfPageLink(
+                      bookId,
+                      page,
+                      isUserBook: widget.tab.book.isUserBook,
+                    ),
+                  );
                 }
                 return KeyEventResult.handled;
               }
@@ -5218,8 +5229,12 @@ class _PdfBookScreenState extends State<PdfBookScreen>
                       widget: const SizedBox.shrink(),
                       icon: FluentIcons.link_24_regular,
                       tooltip: 'העתק קישור ישיר לספר זה',
-                      onPressed: () =>
-                          copyLinkToClipboard(buildPdfBookLink(bookId)),
+                      onPressed: () => copyLinkToClipboard(
+                        buildPdfBookLink(
+                          bookId,
+                          isUserBook: widget.tab.book.isUserBook,
+                        ),
+                      ),
                     ),
                     ActionButtonData(
                       widget: const SizedBox.shrink(),
@@ -5229,7 +5244,13 @@ class _PdfBookScreenState extends State<PdfBookScreen>
                         final page =
                             widget.tab.pdfViewerController.pageNumber ??
                             widget.tab.pageNumber;
-                        copyLinkToClipboard(buildPdfPageLink(bookId, page));
+                        copyLinkToClipboard(
+                          buildPdfPageLink(
+                            bookId,
+                            page,
+                            isUserBook: widget.tab.book.isUserBook,
+                          ),
+                        );
                       },
                     ),
                   ];
