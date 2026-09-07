@@ -71,7 +71,11 @@ class StartupTimeline {
   }
 
   /// נקודת ציון ללא משך — למשל "הבוטסטרפ הסתיים" או "חשיפה דרך רשת הביטחון".
-  void mark(String name) => _marks.add(_Mark(name, elapsedMs));
+  /// אחרי החשיפה הציונים נזרקים: הרשומה כבר נכתבה, ואין טעם לצבור זיכרון.
+  void mark(String name) {
+    if (_reported) return;
+    _marks.add(_Mark(name, elapsedMs));
+  }
 
   /// כמו [mark], אך רק בפעם הראשונה — לנקודות שחוזרות בכל build.
   void markOnce(String name) {

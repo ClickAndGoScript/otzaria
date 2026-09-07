@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/core/startup_timeline.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/models/pdf_headings.dart';
 import 'package:otzaria/pdf_book/bloc/pdf_book_event.dart';
@@ -175,9 +176,11 @@ class PdfBookBloc extends Bloc<PdfBookEvent, PdfBookState> {
     // _pdfrxInit is injectable for tests (pass () async {} to skip init).
     // try/catch: אם האתחול עצמו זורק (למשל, platform channel חסר בבדיקות),
     // ממשיכים — ה-watchdog ייתן timeout ויציג שגיאה במקום לתקוע לנצח.
+    StartupTimeline.instance.markOnce('pdf:pdfrxInit');
     try {
       await _pdfrxInit();
     } catch (_) {}
+    StartupTimeline.instance.markOnce('pdf:pdfrxInitDone');
     if (isClosed || state is! PdfBookLoading) return;
     _startLoadWatchdog();
 

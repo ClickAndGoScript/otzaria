@@ -10,6 +10,7 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/core/startup_timeline.dart';
 import 'package:otzaria/widgets/misc/app_selection_area.dart';
 import 'package:otzaria/widgets/misc/app_menu_exports.dart';
 import 'package:otzaria/widgets/misc/link_context_menu_entry.dart';
@@ -826,6 +827,7 @@ class _PdfBookScreenState extends State<PdfBookScreen>
     super.initState();
     // ה-listener ב-build יורה רק על שינוי; המצב ההתחלתי נקבע כאן, אחרת חלונית
     // שנפתחה כלא-פעילה הייתה מורשית לתפוס פוקוס עד השינוי הראשון.
+    StartupTimeline.instance.markOnce('pdf:initState');
     _pdfViewFocusNode.canRequestFocus = _isActivePane(
       context.read<TabsBloc>().state,
     );
@@ -841,6 +843,7 @@ class _PdfBookScreenState extends State<PdfBookScreen>
     widget.tab.pdfViewerController = pdfController;
     _resolvedPdfPath = resolveMovedFileBookPath(widget.tab.book.path);
     _pdfDocumentRef = _createDocumentRef();
+    StartupTimeline.instance.markOnce('pdf:documentRefCreated');
 
     final settingsBloc = context.read<SettingsBloc>();
     final initialGlobalLayoutMode = settingsBloc.state.pdfBookViewByDefault
@@ -951,7 +954,9 @@ class _PdfBookScreenState extends State<PdfBookScreen>
     _loadActiveCommentators();
 
     // בדיקת קיום הקובץ — פעם אחת ב-initState, לפני הבנייה הראשונה
+    StartupTimeline.instance.markOnce('pdf:beforeExistsSync');
     _pdfFileExists = File(_resolvedPdfPath).existsSync();
+    StartupTimeline.instance.markOnce('pdf:afterExistsSync');
 
     // הגדרת Bloc לטיפול בקיום הקובץ ושאר מצבים
     _bloc.add(const pdf_events.LoadPdfDocument());
@@ -1715,12 +1720,14 @@ class _PdfBookScreenState extends State<PdfBookScreen>
           ? [textSearcher!.pageTextMatchPaintCallback]
           : null,
       onDocumentChanged: (document) async {
+        StartupTimeline.instance.markOnce('pdf:documentChanged');
         if (document == null) {
           widget.tab.documentRef.value = null;
           widget.tab.outline.value = null;
         }
       },
       onViewerReady: (document, controller) async {
+        StartupTimeline.instance.markOnce('pdf:viewerReady');
         if (!mounted) return;
         // איפוס stability tracking של פתיחה קודמת (רלוונטי ב-retry).
         _cancelStableLayoutTracking();
@@ -4128,6 +4135,7 @@ class _PdfBookScreenState extends State<PdfBookScreen>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    StartupTimeline.instance.markOnce('pdf:build');
 
     return BlocProvider.value(
       value: _bloc,
