@@ -191,6 +191,12 @@ void main() {
       expect(result.actions, hasLength(2));
       expect(result.actions.map((a) => a.label), ['עדכון דלתא', 'הורדה מלאה']);
       expect(
+        result.kind,
+        WorkStatusKind.awaitingInput,
+        reason: 'טבעת 0% נראית כמו עבודה שנתקעה — כאן אין עבודה, יש שאלה',
+      );
+      expect(result.progress, isNull);
+      expect(
         result.actions.every((a) => !a.emphasized),
         isTrue,
         reason: 'אין המלצה — הבחירה תלויה במהירות הרשת של המשתמש',

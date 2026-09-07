@@ -28,7 +28,7 @@ WorkStatusItem? libraryUpdateWorkStatusItem(
       title: 'עדכון ספרייה',
       message: state.message,
       detail: 'בחר כיצד לעדכן',
-      progress: 0,
+      kind: WorkStatusKind.awaitingInput,
       actions: [
         WorkStatusAction(
           label: 'עדכון דלתא',

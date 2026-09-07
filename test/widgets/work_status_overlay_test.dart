@@ -47,7 +47,9 @@ void main() {
       cubit.close();
     });
 
-    testWidgets('מעגל אחוזים כלפי מטה כדי לא להציג 100% טרם סיום', (tester) async {
+    testWidgets('מעגל אחוזים כלפי מטה כדי לא להציג 100% טרם סיום', (
+      tester,
+    ) async {
       final cubit = WorkStatusCubit();
       cubit.upsert(
         const WorkStatusItem(
@@ -214,6 +216,33 @@ void main() {
       expect(find.text('לחץ לניסיון חוזר'), findsOneWidget);
       expect(find.byIcon(FluentIcons.error_circle_24_regular), findsOneWidget);
       expect(find.byType(CircularProgressIndicator), findsNothing);
+      cubit.close();
+    });
+
+    testWidgets('פריט הממתין להחלטה מוצג עם אייקון שאלה ולא עם טבעת', (
+      tester,
+    ) async {
+      final cubit = WorkStatusCubit();
+      cubit.upsert(
+        const WorkStatusItem(
+          id: 'library_update',
+          title: 'עדכון ספרייה',
+          message: 'עדכון דלתא או הורדה מלאה',
+          detail: 'בחר כיצד לעדכן',
+          kind: WorkStatusKind.awaitingInput,
+        ),
+      );
+
+      await tester.pumpWidget(_wrap(const WorkStatusOverlay(), cubit));
+      await tester.pump();
+
+      expect(find.text('בחר כיצד לעדכן'), findsOneWidget);
+      expect(
+        find.byIcon(FluentIcons.question_circle_24_regular),
+        findsOneWidget,
+      );
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('0%'), findsNothing);
       cubit.close();
     });
 

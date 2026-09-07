@@ -83,6 +83,45 @@ void main() {
     expect(leftoverArchive.existsSync(), isFalse);
   });
 
+  test('אימות המחולץ מדווח התקדמות בבייטים, מ-0 ועד גודל הקובץ', () async {
+    final extractedPath = p.join(tmp.path, 'patch-v1-v2.db');
+    File(extractedPath).writeAsBytesSync(uncompressed, flush: true);
+    final verify = <(int, int)>[];
+
+    await buildNoNetwork().downloadAndExtract(
+      patchFile: entry(),
+      downloadUrl: 'https://x/patch-v1-v2.db.zst',
+      destDir: tmp,
+      onVerifyProgress: (d, t) => verify.add((d, t)),
+    );
+
+    expect(verify.first, (0, uncompressed.length));
+    expect(verify.last, (uncompressed.length, uncompressed.length));
+    expect(verify.every((e) => e.$2 == uncompressed.length), isTrue);
+  });
+
+  test(
+    'ביטול באמצע אימות המחולץ → PatchDownloadCancelled, הקובץ נשאר',
+    () async {
+      final extractedPath = p.join(tmp.path, 'patch-v1-v2.db');
+      File(extractedPath).writeAsBytesSync(uncompressed, flush: true);
+      var cancelled = false;
+
+      await expectLater(
+        buildNoNetwork().downloadAndExtract(
+          patchFile: entry(),
+          downloadUrl: 'https://x/patch-v1-v2.db.zst',
+          destDir: tmp,
+          onVerifyProgress: (d, t) => cancelled = true,
+          isCancelled: () => cancelled,
+        ),
+        throwsA(isA<PatchDownloadCancelled>()),
+      );
+      // הקובץ תקין — נמחק רק כשהאימות נכשל, לא כשהופסק.
+      expect(File(extractedPath).existsSync(), isTrue);
+    },
+  );
+
   test('מחולץ בגודל תואם אך hash שגוי → נמחק ומורידים מחדש', () async {
     final extractedPath = p.join(tmp.path, 'patch-v1-v2.db');
     File(extractedPath).writeAsBytesSync(

@@ -313,6 +313,15 @@ class LibraryUpdateRepository implements LibraryUpdateService {
               bytesTotal: total,
             ),
           ),
+          // אימות patch פרוס של כמה GB נמשך עשרות שניות — בלי מד הוא נראה קפוא.
+          onVerifyProgress: (done, total) => onProgress?.call(
+            LibraryUpdateProgress(
+              phase: LibraryUpdatePhase.verifying,
+              stepIndex: i,
+              totalSteps: steps.length,
+              applyProgress: total > 0 ? (done / total).clamp(0.0, 1.0) : null,
+            ),
+          ),
         );
 
         try {

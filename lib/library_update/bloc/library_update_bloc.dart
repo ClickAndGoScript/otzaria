@@ -572,7 +572,9 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
       case LibraryUpdateStatus.refreshing:
         return false;
       case LibraryUpdateStatus.applying:
-        return state.plan?.kind == LibraryUpdatePlanKind.fullDownload;
+        // בדלתא, applying לפני הכתיבה הוא אימות ה-patch הפרוס — עדיין ניתן לבטל.
+        return state.plan?.kind == LibraryUpdatePlanKind.fullDownload ||
+            !_deltaWriteStarted;
       default:
         return true;
     }
