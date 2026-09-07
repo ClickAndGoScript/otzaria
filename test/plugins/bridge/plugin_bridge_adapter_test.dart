@@ -2373,6 +2373,39 @@ Future<void> main() async {
       expect(hit, isFalse);
     });
 
+    test('body שאינו מחרוזת נדחה ב-invalid_params לפני ביצוע הבקשה', () async {
+      var hit = false;
+      final fetchService = PluginNetworkFetchService(
+        client: MockClient((req) async {
+          hit = true;
+          return http.Response('', 200);
+        }),
+      );
+      final adapter = buildAdapter(fetchService);
+
+      await expectLater(
+        () => adapter.execute(
+          'network',
+          'fetchStream',
+          const {
+            'url': 'https://nakdan.dicta.org.il/api',
+            'method': 'POST',
+            'body': {'task': 'nakdan'},
+            '__streamId': 'network_contract_body_type',
+          },
+          eventSink: (_, _) async {},
+        ),
+        throwsA(
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'message',
+            contains('error.invalid_params: body'),
+          ),
+        ),
+      );
+      expect(hit, isFalse);
+    });
+
     test('timeoutMs מעל התקרה נדחה לפני ביצוע הבקשה', () async {
       var hit = false;
       final fetchService = PluginNetworkFetchService(

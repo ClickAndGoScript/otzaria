@@ -5921,6 +5921,10 @@ class PluginBridgeAdapter {
         'up to ${PluginNetworkFetchService.maxTimeout.inMilliseconds}',
       );
     }
+    final rawBody = args['body'];
+    if (rawBody != null && rawBody is! String) {
+      throw Exception('error.invalid_params: body must be a string');
+    }
     final rawHeaders = args['headers'];
     final headers = <String, String>{};
     if (rawHeaders is Map) {
@@ -5935,7 +5939,7 @@ class PluginBridgeAdapter {
       uri: uri,
       method: method,
       headers: headers.isEmpty ? null : headers,
-      body: args['body'] as String?,
+      body: rawBody as String?,
       timeout: rawTimeoutMs == null
           ? PluginNetworkFetchService.defaultTimeout
           : Duration(milliseconds: rawTimeoutMs),
