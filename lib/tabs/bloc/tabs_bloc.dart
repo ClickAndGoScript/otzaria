@@ -12,6 +12,8 @@ import 'package:otzaria/tabs/tabs_repository.dart';
 import 'package:otzaria/tabs/bloc/tabs_state.dart';
 import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/tabs/models/combined_tab.dart';
+import 'package:otzaria/tabs/models/commentators_tab.dart';
+import 'package:otzaria/tabs/models/pdf_commentators_tab.dart';
 import 'package:otzaria/tabs/models/pdf_tab.dart';
 import 'package:otzaria/tabs/models/reading_tab_search_state.dart';
 import 'package:otzaria/tabs/models/text_tab.dart';
@@ -116,12 +118,46 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
         Future<void>.value();
   }
 
+  /// מעביר בעלות משותפת על [pane] לכרטיסיות המפרשים ששורדות.
+  bool _transferSourceTabOwnership(OpenedTab pane) {
+    final ownership = SourceTabOwnership(pane);
+    var transferred = false;
+    for (final survivor in state.tabs) {
+      for (final surviving in leafPanes(survivor)) {
+        if (surviving is CommentatorsTab &&
+            identical(surviving.sourceTab, pane)) {
+          surviving.assumeSourceTabOwnership(ownership);
+          transferred = true;
+        }
+        if (surviving is PdfCommentatorsTab &&
+            identical(surviving.sourceTab, pane)) {
+          surviving.assumeSourceTabOwnership(ownership);
+          transferred = true;
+        }
+      }
+    }
+    return transferred;
+  }
+
   void _disposeTabLater(OpenedTab tab) {
-    unawaited(
-      Future<void>.delayed(const Duration(milliseconds: 350), () {
-        tab.dispose();
-      }),
-    );
+    // חלונית שמפרשים ששרדו מחזיקים בה אינה משוחררת; אחיותיה כן.
+    final inherited = leafPanes(tab).where(_transferSourceTabOwnership).toSet();
+    if (inherited.isEmpty) {
+      unawaited(
+        Future<void>.delayed(const Duration(milliseconds: 350), () {
+          tab.dispose();
+        }),
+      );
+      return;
+    }
+    for (final pane in leafPanes(tab)) {
+      if (inherited.contains(pane)) continue;
+      unawaited(
+        Future<void>.delayed(const Duration(milliseconds: 350), () {
+          pane.dispose();
+        }),
+      );
+    }
   }
 
   TabsBloc({
@@ -1238,18 +1274,22 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
   }
 
   Future<void> _onMoveTab(MoveTab event, Emitter<TabsState> emit) async {
-    final newTabs = List<OpenedTab>.from(state.tabs);
-    newTabs.remove(event.tab);
-    newTabs.insert(event.newIndex, event.tab);
+    // ⚠️ בלי בדיקת השייכות, `MoveTab` על כרטיסיה שנסגרה **מחדיר** אותה —
+    // ואת ה-`dispose` שלה כבר תזמנו. האינדקס מגיע מרצועת היעד ויכול
+    // להתיישן בין הריחוף לשחרור.
+    if (!state.tabs.contains(event.tab)) return;
+    final newTabs = List<OpenedTab>.from(state.tabs)..remove(event.tab);
+    final targetIndex = event.newIndex.clamp(0, newTabs.length);
+    newTabs.insert(targetIndex, event.tab);
 
     emit(
       state.copyWith(
         tabs: newTabs,
         // כמו בדפדפן: הכרטיסייה שנגררה היא שמוצגת בתום הסידור (issue #1104).
-        currentTabIndex: event.newIndex,
+        currentTabIndex: targetIndex,
       ),
     );
-    _scheduleSave(newTabs, event.newIndex);
+    _scheduleSave(newTabs, targetIndex);
   }
 
   Future<void> _onNavigateToNextTab(

@@ -247,6 +247,47 @@ void main() {
       act: (bloc) => bloc.add(ClearIndex()),
       verify: (bloc) => expect(repositoryOf(bloc).clearCalls, 0),
     );
+
+    // עבודת התחזוקה נשלחת בכל טעינת ספרייה, גם בחלון משני. חסימה שפולטת
+    // מצב פירושה הודעה למשתמש בכל פתיחת חלון — וגם דריסת מצב האינדקס.
+    blocTest<IndexingBloc, IndexingState>(
+      'ניקוי רשומות יתומות נחסם בשקט — בלי פליטת מצב',
+      build: _FakeIndexingBloc.new,
+      act: (bloc) => bloc.add(DropOrphanedIndexEntries(libraryWithBooks())),
+      expect: () => <IndexingState>[],
+    );
+
+    blocTest<IndexingBloc, IndexingState>(
+      'אינדוקס ספרים חדשים נחסם בשקט — בלי פליטת מצב',
+      build: _FakeIndexingBloc.new,
+      act: (bloc) {
+        final library = libraryWithBooks();
+        bloc.add(IndexSpecificBooks(library.books, library));
+      },
+      expect: () => <IndexingState>[],
+    );
+
+    blocTest<IndexingBloc, IndexingState>(
+      'התאמת האינדקס נחסמת בשקט — בלי פליטת מצב',
+      build: _FakeIndexingBloc.new,
+      act: (bloc) => bloc.add(ReconcileIndex(libraryWithBooks())),
+      expect: () => <IndexingState>[],
+    );
+
+    // לעומתן — בקשה שהמשתמש יזם כן מדווחת ומאפסת את המצב.
+    blocTest<IndexingBloc, IndexingState>(
+      'אינדוקס מלא שהמשתמש ביקש מאפס את המצב (ומדווח למשתמש)',
+      build: _FakeIndexingBloc.new,
+      act: (bloc) => bloc.add(StartIndexing(libraryWithBooks())),
+      expect: () => [IndexingInitial()],
+    );
+
+    blocTest<IndexingBloc, IndexingState>(
+      'איפוס אינדקס שהמשתמש ביקש מאפס את המצב (ומדווח למשתמש)',
+      build: _FakeIndexingBloc.new,
+      act: (bloc) => bloc.add(ClearIndex()),
+      expect: () => [IndexingInitial()],
+    );
   });
 
   group('עבודות אינדוקס נוספות', () {

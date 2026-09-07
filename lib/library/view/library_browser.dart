@@ -1424,6 +1424,12 @@ class _LibraryBrowserState extends State<LibraryBrowser>
       onOpenLink: isDeepLink
           ? () => _tryHandleDeepLink(context, searchText)
           : null,
+      onSearchWholeLibrary: () => _handleNavigateHome(
+        context,
+        state,
+        settingsState,
+        keepSearchQuery: true,
+      ),
       showSearchElsewhereHint: keepSearch,
     );
   }

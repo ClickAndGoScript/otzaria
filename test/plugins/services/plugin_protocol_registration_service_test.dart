@@ -110,6 +110,34 @@ void main() {
       }
     });
 
+    // "פרוטוקול מהימן" באופיס (issue #1167)
+    test('buildOfficeTrustedProtocolKeys מכסה את כל גרסאות האופיס', () {
+      final keys =
+          PluginProtocolRegistrationService.buildOfficeTrustedProtocolKeys();
+
+      expect(keys, hasLength(4));
+      for (final version in const ['12.0', '14.0', '15.0', '16.0']) {
+        expect(
+          keys,
+          contains(
+            'Software\\Policies\\Microsoft\\Office\\$version\\Common\\Security\\'
+            'Trusted Protocols\\All Applications\\otzaria:',
+          ),
+          reason: 'חסר מפתח פרוטוקול מהימן עבור Office $version',
+        );
+      }
+    });
+
+    test('שם המפתח מסתיים בנקודתיים — בלעדיהן אופיס לא מזהה את הפרוטוקול', () {
+      final keys =
+          PluginProtocolRegistrationService.buildOfficeTrustedProtocolKeys();
+
+      for (final key in keys) {
+        expect(key, endsWith('otzaria:'));
+        expect(key, isNot(startsWith('HKCU')));
+      }
+    });
+
     test('buildLinuxDesktopEntry does not add leading or empty lines', () {
       final entry = PluginProtocolRegistrationService.buildLinuxDesktopEntry(
         executable: '/opt/otzaria/otzaria',

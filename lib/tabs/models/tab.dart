@@ -134,6 +134,9 @@ abstract class OpenedTab {
         isPinned: tab.isPinned,
         dedupeKey: tab.dedupeKey,
         requiresStableLayout: tab.requiresStableLayout,
+        // `ExternalBookMatches` מחזיק `List.unmodifiable` בלבד, ולכן שיתוף
+        // המופע בטוח.
+        externalMatches: tab.externalMatches.value,
       );
       // ⚠️ שדות שנקבעים **אחרי** הבנייה, ולכן אינם עוברים בפרמטרים.
       // בלעדיהם שיכפול כרטיסיה, מעבר שולחן עבודה ופיצול לשתי חלוניות
@@ -252,4 +255,21 @@ abstract class OpenedTab {
     throw FormatException('Unknown tab type: $type');
   }
   Map<String, dynamic> toJson();
+}
+
+/// מחזיק טאב מקור חי עד שכל הכרטיסיות התלויות בו נסגרות.
+class SourceTabOwnership {
+  SourceTabOwnership(this.sourceTab);
+
+  final OpenedTab sourceTab;
+  int _leases = 0;
+
+  void retain() {
+    _leases++;
+  }
+
+  void release() {
+    if (_leases == 0 || --_leases != 0) return;
+    sourceTab.dispose();
+  }
 }

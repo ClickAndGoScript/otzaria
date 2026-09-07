@@ -63,12 +63,13 @@ void main() {
       }
     });
 
-    test('all מייצר בדיוק את ארבעת המקטעים', () {
+    test('all מייצר בדיוק את ארבעת המקטעים הקלים', () {
       final json = reportFor(InfoTopic.all).toJson();
 
       for (final slug in ['app', 'library', 'plugins', 'errors']) {
         expect(json.containsKey(slug), isTrue, reason: slug);
       }
+      expect(json.containsKey('folders'), isFalse);
       expect(json.keys, hasLength(3 + 4));
     });
 

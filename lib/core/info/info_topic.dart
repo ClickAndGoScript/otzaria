@@ -4,9 +4,10 @@
 enum InfoTopic {
   app('app', 'מידע על התוכנה'),
   library('library', 'מידע על הספרייה'),
+  folders('folders', 'תיקיות ספרים אישיים'),
   plugins('plugins', 'מידע על התוספים'),
   errors('errors', 'השגיאות האחרונות'),
-  all('all', 'מידע מלא');
+  all('all', 'מידע כללי');
 
   const InfoTopic(this.slug, this.title);
 
@@ -26,6 +27,13 @@ enum InfoTopic {
       case 'library':
       case 'books':
         return InfoTopic.library;
+      case 'folders':
+      case 'folder':
+      case 'personal':
+      case 'personal_books':
+      case 'personal_folders':
+      case 'custom_folders':
+        return InfoTopic.folders;
       case 'plugins':
       case 'plugin':
         return InfoTopic.plugins;
@@ -41,7 +49,7 @@ enum InfoTopic {
     }
   }
 
-  /// הנושאים שנכללים בדוח עבור נושא מבוקש. `all` מרחיב לכל השאר.
+  /// הנושאים שנכללים בדוח עבור נושא מבוקש. סריקת תיקיות נשארת מפורשת.
   List<InfoTopic> get sections => this == InfoTopic.all
       ? const [
           InfoTopic.app,

@@ -9,12 +9,16 @@ import 'package:otzaria/tabs/models/pdf_tab.dart';
 /// החסרים. במצב זה הטאב הוא הבעלים של ה-sourceTab ומשחרר אותו ב-dispose.
 class PdfCommentatorsTab extends OpenedTab {
   final PdfBookTab sourceTab;
-  final bool _disposeSourceTabOnDispose;
+  SourceTabOwnership? _sourceTabOwnership;
 
   PdfCommentatorsTab({
     required this.sourceTab,
-    this._disposeSourceTabOnDispose = false,
-  }) : super('מפרשים | ${sourceTab.title}');
+    bool disposeSourceTabOnDispose = false,
+  }) : super('מפרשים | ${sourceTab.title}') {
+    if (disposeSourceTabOnDispose) {
+      _sourceTabOwnership = SourceTabOwnership(sourceTab)..retain();
+    }
+  }
 
   /// שחזור מ-JSON — בונה sourceTab חדש מהנתונים השמורים.
   factory PdfCommentatorsTab.fromJson(Map<String, dynamic> json) {
@@ -59,11 +63,19 @@ class PdfCommentatorsTab extends OpenedTab {
     )..isPinned = isPinned;
   }
 
+  /// יורש את הבעלות על [sourceTab] כשטאב הספר שהחזיק אותו נסגר.
+  ///
+  /// ⚠️ בלי זה שחרור טאב הספר משאיר את הכרטיסיה הזו מצביעה על
+  /// `currentTitle` משוחרר — ורצועת הכרטיסיות עצמה מאזינה לו.
+  void assumeSourceTabOwnership(SourceTabOwnership ownership) {
+    assert(identical(ownership.sourceTab, sourceTab));
+    _sourceTabOwnership = ownership..retain();
+  }
+
   @override
   void dispose() {
-    if (_disposeSourceTabOnDispose) {
-      sourceTab.dispose();
-    }
+    _sourceTabOwnership?.release();
+    _sourceTabOwnership = null;
     super.dispose();
   }
 

@@ -45,6 +45,13 @@ class ReadingTabStrip extends StatefulWidget {
   /// מידת כל כרטיסיה לאורך ציר הרצועה — רוחב באופקית, גובה באנכית.
   final List<double> widths;
 
+  /// הכרטיסיה הפעילה, או ‎-1 כשאין כזו.
+  ///
+  /// ⚠️ נדרש למוק הנגרר, לא לעיצוב: אזור התוכן מצייר רק את הכרטיסיה
+  /// הפעילה, ולכן רק היא רשאית לצרף את תוכנה למוק. ראו
+  /// `_DraggableTabState._buildPreview`.
+  final int activeTabIndex;
+
   /// ציר הרצועה. באנכית אין היפוך RTL: הכרטיסיה הראשונה תמיד למעלה.
   final Axis axis;
 
@@ -114,6 +121,7 @@ class ReadingTabStrip extends StatefulWidget {
     super.key,
     required this.tabs,
     required this.widths,
+    required this.activeTabIndex,
     required this.tabBuilder,
     required this.onReorder,
     required this.stripColor,
@@ -434,6 +442,7 @@ class _ReadingTabStripState extends State<ReadingTabStrip> {
                       _DraggableTab(
                         key: ObjectKey(widget.tabs[i]),
                         tab: widget.tabs[i],
+                        isActive: i == widget.activeTabIndex,
                         axis: widget.axis,
                         extent: widget.widths[i],
                         crossExtent: widget.crossExtent,
@@ -545,6 +554,10 @@ class _TabStripGeometry {
 /// כרטיסיה בודדת ברצועה, ניתנת לגרירה.
 class _DraggableTab extends StatefulWidget {
   final OpenedTab tab;
+
+  /// האם זו הכרטיסיה הפעילה — ראו [ReadingTabStrip.activeTabIndex].
+  final bool isActive;
+
   final Axis axis;
   final double extent;
   final double? crossExtent;
@@ -570,6 +583,7 @@ class _DraggableTab extends StatefulWidget {
   const _DraggableTab({
     super.key,
     required this.tab,
+    required this.isActive,
     required this.axis,
     required this.extent,
     required this.crossExtent,
@@ -672,10 +686,14 @@ class _DraggableTabState extends State<_DraggableTab> {
 
   void _handleDragStarted() {
     _dragging = true;
-    _previewPending = true;
     // ⚠️ מודיעים **מיד**, ובלי להמתין לצילום: התצוגה הנייטיבית מתחילה עם
     // שרטוט GDI כדי שלא יהיה רגע ריק, והתמונה מגיעה בקריאה שנייה.
     widget.onDragStarted?.call(_cancelDrag);
+    // ⚠️ אזור התוכן מצייר את הכרטיסיה **הפעילה**, וגרירה במכוון אינה בוחרת
+    // כרטיסיה. צילומו בגרירת כרטיסיה אחרת הציג את תוכן הפעילה כאילו הוא
+    // שלה; בלי צילום המוק נופל לראש הכרטיסיה לבדו, וזה נכון.
+    if (!widget.isActive) return;
+    _previewPending = true;
     unawaited(_finishPreview());
   }
 
