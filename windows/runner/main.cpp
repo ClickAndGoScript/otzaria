@@ -13,6 +13,7 @@
 
 #include "flutter_window.h"
 #include "splash_window.h"
+#include "startup_watchdog.h"
 #include "utils.h"
 
 static const wchar_t* kSingleInstanceMutexName = L"OtzariaAppSingleInstance";
@@ -320,6 +321,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // Skipped for CLI invocations (no UI).
   if (!is_cli_invocation) {
     splash::Show();
+    // ⚠️ לפני יצירת המנוע: ה-UI isolate של Dart רץ על ה-thread הזה, וקוד
+    // נייטיב סינכרוני חוסם גם פריימים וגם טיימרים (issue #1192).
+    startup_watchdog::Start();
   }
 
   flutter::DartProject project(L"data");
@@ -374,6 +378,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::RemovePropW(main_hwnd, kMainWindowPropName);
   }
 
+  startup_watchdog::Stop();
   if (mutex) CloseHandle(mutex);
   ::CoUninitialize();
   return EXIT_SUCCESS;

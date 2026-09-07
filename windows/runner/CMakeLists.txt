@@ -12,6 +12,7 @@ add_executable(${BINARY_NAME} WIN32
   "jump_list_manager.cpp"
   "main.cpp"
   "splash_window.cpp"
+  "startup_watchdog.cpp"
   "utils.cpp"
   "win32_window.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
@@ -44,6 +45,8 @@ target_link_libraries(${BINARY_NAME} PRIVATE "windowscodecs.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "ole32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "propsys.lib")
+# psapi — מפת המודולים של גלאי התקיעות (startup_watchdog.cpp).
+target_link_libraries(${BINARY_NAME} PRIVATE "psapi.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
