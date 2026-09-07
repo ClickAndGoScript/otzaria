@@ -1217,8 +1217,7 @@ bool FlutterWindow::OnCreate() {
       });
 
   // ערוץ עדכון ה-Jump List: Dart שולח "updateTabs" עם רשימת כותרות הטאבים.
-  // ה-handler רץ על ה-UI thread (אותו STA שאיתחל COM ב-main.cpp), כנדרש
-  // ל-ICustomDestinationList.
+  // העבודה עצמה רצה על thread עובד — ראו UpdateOpenTabsAsync.
   jumplist_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
           flutter_controller_->engine()->messenger(), "otzaria/jumplist",
@@ -1249,8 +1248,8 @@ bool FlutterWindow::OnCreate() {
           }
         }
 
-        result->Success(
-            flutter::EncodableValue(jump_list::UpdateOpenTabs(titles)));
+        jump_list::UpdateOpenTabsAsync(std::move(titles));
+        result->Success(flutter::EncodableValue(true));
       });
 
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
