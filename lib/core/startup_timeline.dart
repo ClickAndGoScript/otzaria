@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:otzaria/core/error_log_file.dart';
 
@@ -22,10 +24,28 @@ class StartupTimeline {
   final List<_Phase> _phases = [];
   final List<_Mark> _marks = [];
   bool _reported = false;
+  Timer? _stallWatch;
+  int _lastTickMs = 0;
 
-  /// מתחיל את השעון. קריאה חוזרת אינה מאפסת אותו.
+  /// טיימר שמאחר ביותר מזה נחשב לקיפאון של ה-isolate הראשי ונרשם כציון.
+  static const Duration stallThreshold = Duration(seconds: 1);
+  static const Duration _stallTick = Duration(milliseconds: 250);
+
+  /// מתחיל את השעון ואת מזהה הקיפאון. קריאה חוזרת אינה מאפסת אותם.
   void start() {
-    if (!_clock.isRunning && _clock.elapsedTicks == 0) _clock.start();
+    if (_clock.isRunning || _clock.elapsedTicks != 0) return;
+    _clock.start();
+    // ציר הזמן מראה מתי חלון של קוד רץ, לא מה חסם בין לבין; טיימר שמאחר
+    // חושף חסימה סינכרונית ומתי היא קרתה, גם אם איש לא עטף אותה בפאזה.
+    _lastTickMs = 0;
+    _stallWatch = Timer.periodic(_stallTick, (_) {
+      final now = elapsedMs;
+      final gap = now - _lastTickMs - _stallTick.inMilliseconds;
+      if (gap >= stallThreshold.inMilliseconds) {
+        _marks.add(_Mark('stall:${gap}ms', _lastTickMs));
+      }
+      _lastTickMs = now;
+    });
   }
 
   int get elapsedMs => _clock.elapsedMilliseconds;
@@ -65,6 +85,8 @@ class StartupTimeline {
     if (_reported) return;
     _reported = true;
     _clock.stop();
+    _stallWatch?.cancel();
+    _stallWatch = null;
     if (_clock.elapsed < slowThreshold) return;
     try {
       _sink(format(now: now, version: version));

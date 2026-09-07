@@ -44,6 +44,20 @@ void main() {
     expect(timeline.phaseSync('y', () => 'sync'), 'sync');
   });
 
+  test('חסימה סינכרונית של ה-isolate נרשמת כציון stall', () async {
+    final written = <String>[];
+    final timeline = StartupTimeline(
+      sink: written.add,
+      slowThreshold: Duration.zero,
+    )..start();
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    final sw = Stopwatch()..start();
+    while (sw.elapsedMilliseconds < 1300) {}
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    timeline.finishAtReveal();
+    expect(written.single, contains(RegExp(r'  stall:\d+ms: @\d+ms')));
+  });
+
   test('markOnce רושם ציון חוזר פעם אחת בלבד', () {
     final written = <String>[];
     final timeline = StartupTimeline(

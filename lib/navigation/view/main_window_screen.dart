@@ -723,7 +723,9 @@ class MainWindowScreenState extends State<MainWindowScreen>
         pendingPane.bloc.state is! TextBookError;
 
     if (!shouldWaitForBook) {
-      StartupTimeline.instance.mark('reveal:immediate');
+      StartupTimeline.instance.mark(
+        'reveal:immediate:${pendingPane?.runtimeType ?? currentTab.runtimeType}',
+      );
       _revealMainWindowOnce();
       return;
     }
@@ -807,7 +809,9 @@ class MainWindowScreenState extends State<MainWindowScreen>
           _splashOverlayVisible = false;
         });
       }
+      StartupTimeline.instance.mark('reveal:contentShown');
       await WidgetsBinding.instance.endOfFrame;
+      StartupTimeline.instance.mark('reveal:firstFrame');
       await presentMainWindow();
       await WidgetsBinding.instance.endOfFrame;
       if (!_skipsEagerLibraryLoad) libraryBloc.add(LoadLibrary());
