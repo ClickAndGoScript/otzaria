@@ -338,8 +338,8 @@ class LibraryUpdateRepository implements LibraryUpdateService {
             verifyTableBytes = mergedTableBytes;
             _writeTableBytesQuietly(tableBytesFile, mergedTableBytes);
           }
-          // הדיווח האחרון מ-compute הוא הסך המדויק — total לריצות הבאות.
-          if (lastVerifyDone > 0) {
+          // באימות מלא הדיווח האחרון הוא ה-total המדויק לריצה הבאה.
+          if (lastVerifyDone > 0 && deferred.isEmpty) {
             verifyTotalHint = lastVerifyDone;
             _writeIntQuietly(hintFile, lastVerifyDone);
           }
@@ -363,6 +363,14 @@ class LibraryUpdateRepository implements LibraryUpdateService {
         // הכשל המקורית; ה-BLoC עדיין יוכל להציע fallback ולרענן אחרי ההחלטה.
         refreshError = error;
       }
+      final drifted = await _verifyDeferredTables(
+        dbPath: dbPath,
+        manifest: lastAppliedManifest,
+        deferred: deferredIntersection,
+        tableBytesHint: verifyTableBytes,
+        onProgress: onProgress,
+      );
+      _throwIfContentDrifted(drifted, result);
       Error.throwWithStackTrace(
         PartiallyAppliedLibraryDeltaException(
           cause: error,
@@ -388,23 +396,29 @@ class LibraryUpdateRepository implements LibraryUpdateService {
       onProgress: onProgress,
     );
 
-    if (drifted.isNotEmpty) {
-      try {
-        ErrorLogFile.append(
-          title: 'Library Update: content drift in untouched tables',
-          error: 'tables: ${drifted.join(', ')}',
-        );
-      } catch (_) {}
-      throw LibraryDeltaContentDriftException(
-        driftedTables: drifted,
-        appliedResult: result,
-      );
-    }
+    _throwIfContentDrifted(drifted, result);
 
     onProgress?.call(
       const LibraryUpdateProgress(phase: LibraryUpdatePhase.done),
     );
     return result;
+  }
+
+  void _throwIfContentDrifted(
+    List<String> drifted,
+    LibraryDeltaApplyResult result,
+  ) {
+    if (drifted.isEmpty) return;
+    try {
+      ErrorLogFile.append(
+        title: 'Library Update: content drift in untouched tables',
+        error: 'tables: ${drifted.join(', ')}',
+      );
+    } catch (_) {}
+    throw LibraryDeltaContentDriftException(
+      driftedTables: drifted,
+      appliedResult: result,
+    );
   }
 
   /// בודק את הטבלאות שאף צעד לא נגע בהן מול ה-hash של הצעד האחרון, ומחזיר

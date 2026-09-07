@@ -292,6 +292,8 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
       final applyError = e is PartiallyAppliedLibraryDeltaException
           ? e.cause
           : e;
+      final requiresFullIndexRefresh =
+          drift != null || (partial?.requiresFullIndexRefresh ?? false);
       // כל כשל apply (וגם סטייה שהתגלתה אחרי commit) מנותב להורדה מלאה — אחרת
       // כשל שאינו אי-התאמת תוכן משאיר את המשתמש בלולאת שגיאה עד עדכון אפליקציה.
       final mismatchReason = drift != null
@@ -314,8 +316,7 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
               plan: fallback,
               hasUpdate: partial?.hasDatabaseChanges ?? false,
               changedBookIds: partial?.changedBookIds ?? const {},
-              requiresFullIndexRefresh:
-                  partial?.requiresFullIndexRefresh ?? false,
+              requiresFullIndexRefresh: requiresFullIndexRefresh,
             ),
           );
           return;
@@ -327,7 +328,7 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
           message: 'שגיאה בהחלת העדכון',
           hasUpdate: partial?.hasDatabaseChanges ?? false,
           changedBookIds: partial?.changedBookIds ?? const {},
-          requiresFullIndexRefresh: partial?.requiresFullIndexRefresh ?? false,
+          requiresFullIndexRefresh: requiresFullIndexRefresh,
           errorMessage: applyError.toString(),
         ),
       );

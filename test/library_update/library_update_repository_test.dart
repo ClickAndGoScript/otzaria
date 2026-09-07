@@ -717,6 +717,12 @@ void main() {
         (jsonDecode(hintFile.readAsStringSync()) as Map).keys,
         contains('source'),
       );
+      expect(
+        File(
+          p.join(tmp.path, 'library_update_cache', 'verify_total_bytes.txt'),
+        ).existsSync(),
+        isFalse,
+      );
     },
     timeout: const Timeout(Duration(seconds: 60)),
   );
@@ -866,6 +872,92 @@ void main() {
       expect(result.appliedSteps, 2);
       expect(_readSourceName(dbPath), 'newer');
       expect(stages, isNot(contains('verifyDeferred')));
+    },
+    timeout: const Timeout(Duration(seconds: 60)),
+  );
+
+  test(
+    'כשל בצעד מאוחר עדיין מדווח סטייה בטבלה שנדחתה בצעד שהושלם',
+    () async {
+      final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+      final pristinePath = p.join(tmp.path, 'pristine.db');
+      final expectedPath = p.join(tmp.path, 'expected.db');
+      _writeSchema4SourceDb(
+        pristinePath,
+        version: 1,
+        sourceName: 'old',
+        authorName: 'תקין',
+      );
+      _writeSchema4SourceDb(
+        expectedPath,
+        version: 2,
+        sourceName: 'new',
+        authorName: 'תקין',
+      );
+      _writeSchema4SourceDb(
+        dbPath,
+        version: 1,
+        sourceName: 'old',
+        authorName: 'סוטה',
+      );
+      final firstPatch = p.join(tmp.path, 'patch-1-2.db');
+      final invalidPatch = p.join(tmp.path, 'patch-2-3.db');
+      _writeSourcePatch(
+        firstPatch,
+        fromVersion: 1,
+        toVersion: 2,
+        sourceName: 'new',
+      );
+      _writeSourcePatch(
+        invalidPatch,
+        fromVersion: 2,
+        toVersion: 3,
+        sourceName: 'newer',
+        patchFormatVersion: 99,
+      );
+      final repository = LibraryUpdateRepository(
+        discovery: _unusedDiscovery(),
+        downloader: _PatchMapDownloader({
+          'patch-1-2.db': firstPatch,
+          'patch-2-3.db': invalidPatch,
+        }),
+        refreshService: _NoopRefreshService(),
+        dbPathProvider: () => dbPath,
+        dataRootProvider: () async => tmp.path,
+        nowTimestamp: () => '2026-09-08T00:00:00Z',
+      );
+
+      await expectLater(
+        repository.applyDeltaPlan(
+          _schema4DeltaPlan([
+            _schema4Edge(
+              fromVersion: 1,
+              toVersion: 2,
+              patchName: 'patch-1-2.db',
+              toHash: _logicalHash(expectedPath),
+              fromTableHashes: _tableHashes(pristinePath),
+              toTableHashes: _tableHashes(expectedPath),
+            ),
+            _schema4Edge(
+              fromVersion: 2,
+              toVersion: 3,
+              patchName: 'patch-2-3.db',
+              toHash: 'unused',
+            ),
+          ]),
+        ),
+        throwsA(
+          isA<LibraryDeltaContentDriftException>()
+              .having(
+                (e) => e.driftedTables,
+                'driftedTables',
+                contains('author'),
+              )
+              .having((e) => e.appliedResult.appliedSteps, 'appliedSteps', 1),
+        ),
+      );
+      expect(const LocalDbVersionReader().read(dbPath).dbVersion, 2);
+      expect(_readSourceName(dbPath), 'new');
     },
     timeout: const Timeout(Duration(seconds: 60)),
   );

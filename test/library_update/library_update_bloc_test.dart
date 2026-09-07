@@ -1573,7 +1573,6 @@ void main() {
             driftedTables: ['author', 'topic'],
             appliedResult: LibraryDeltaApplyResult(
               changedBookIds: {3, 9},
-              requiresFullIndexRefresh: true,
               appliedSteps: 1,
             ),
           ),
