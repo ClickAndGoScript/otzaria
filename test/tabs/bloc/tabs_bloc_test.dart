@@ -2203,28 +2203,73 @@ void main() {
       await _closeBlocAndAllowDeferredDispose(bloc);
     });
 
+    test('טאב הספר נשאר חי עד סגירת כרטיסיית המפרשים האחרונה', () async {
+      final bloc = TabsBloc(repository: _FakeTabsRepository());
+      final book = _createTextTab('ספר א', categoryId: 1);
+      final first = CommentatorsTab(sourceTab: book);
+      final second = CommentatorsTab(sourceTab: book);
+
+      bloc
+        ..add(AddTab(book))
+        ..add(AddTab(first))
+        ..add(AddTab(second));
+      await bloc.stream.firstWhere((s) => s.tabs.length == 3);
+
+      bloc.add(RemoveTab(book));
+      await bloc.stream.firstWhere((s) => s.tabs.length == 2);
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+
+      first.dispose();
+      expect(book.bloc.isClosed, isFalse);
+      expect(() => book.currentTitle.value, returnsNormally);
+
+      second.dispose();
+      await Future<void>.delayed(Duration.zero);
+      expect(book.bloc.isClosed, isTrue);
+
+      await _closeBlocAndAllowDeferredDispose(bloc);
+    });
+
     test('סגירת טאב PDF אינה משחררת אותו מתחת לכרטיסיית מפרשי PDF', () async {
       final bloc = TabsBloc(repository: _FakeTabsRepository());
-      final book = PdfBookTab(
+      final book = _TrackedPdfBookTab(
         book: PdfBook(title: 'ספר PDF', path: 'a.pdf'),
         pageNumber: 1,
       );
-      final commentators = PdfCommentatorsTab(sourceTab: book);
+      final first = PdfCommentatorsTab(sourceTab: book);
+      final second = PdfCommentatorsTab(sourceTab: book);
 
-      bloc.add(AddTab(book));
-      bloc.add(AddTab(commentators));
-      await bloc.stream.firstWhere((s) => s.tabs.length == 2);
+      bloc
+        ..add(AddTab(book))
+        ..add(AddTab(first))
+        ..add(AddTab(second));
+      await bloc.stream.firstWhere((s) => s.tabs.length == 3);
 
       bloc.add(RemoveTab(book));
-      await bloc.stream.firstWhere((s) => s.tabs.length == 1);
+      await bloc.stream.firstWhere((s) => s.tabs.length == 2);
       await Future<void>.delayed(const Duration(milliseconds: 400));
 
       expect(() => book.currentTitle.value, returnsNormally);
+      first.dispose();
+      expect(book.wasDisposed, isFalse);
 
-      commentators.dispose();
+      second.dispose();
+      expect(book.wasDisposed, isTrue);
       await _closeBlocAndAllowDeferredDispose(bloc);
     });
   });
+}
+
+class _TrackedPdfBookTab extends PdfBookTab {
+  _TrackedPdfBookTab({required super.book, required super.pageNumber});
+
+  bool wasDisposed = false;
+
+  @override
+  void dispose() {
+    wasDisposed = true;
+    super.dispose();
+  }
 }
 
 TextBookBloc _createLoadedTextBookBloc({

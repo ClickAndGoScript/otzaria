@@ -7,7 +7,7 @@ enum InfoTopic {
   folders('folders', 'תיקיות ספרים אישיים'),
   plugins('plugins', 'מידע על התוספים'),
   errors('errors', 'השגיאות האחרונות'),
-  all('all', 'מידע מלא');
+  all('all', 'מידע כללי');
 
   const InfoTopic(this.slug, this.title);
 
@@ -49,12 +49,11 @@ enum InfoTopic {
     }
   }
 
-  /// הנושאים שנכללים בדוח עבור נושא מבוקש. `all` מרחיב לכל השאר.
+  /// הנושאים שנכללים בדוח עבור נושא מבוקש. סריקת תיקיות נשארת מפורשת.
   List<InfoTopic> get sections => this == InfoTopic.all
       ? const [
           InfoTopic.app,
           InfoTopic.library,
-          InfoTopic.folders,
           InfoTopic.plugins,
           InfoTopic.errors,
         ]

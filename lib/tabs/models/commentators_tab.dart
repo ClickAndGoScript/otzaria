@@ -14,7 +14,7 @@ import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 /// אך פועל לגמרי בנפרד ואינו משפיע על sourceTab כלל.
 class CommentatorsTab extends OpenedTab {
   final TextBookTab sourceTab;
-  bool _disposeSourceTabOnDispose;
+  SourceTabOwnership? _sourceTabOwnership;
   late final TextBookBloc bloc;
   final ItemScrollController scrollController = ItemScrollController();
   final ItemPositionsListener positionsListener =
@@ -44,7 +44,7 @@ class CommentatorsTab extends OpenedTab {
 
   CommentatorsTab({
     required this.sourceTab,
-    this._disposeSourceTabOnDispose = false,
+    bool disposeSourceTabOnDispose = false,
     // שכפול בונה sourceTab חדש, שה-bloc שלו עדיין ב-TextBookInitial; בלי
     // העברה מפורשת _resolveSelectedLine היה מחזיר null והשורה הנבחרת
     // הייתה נעלמת בשכפול. null = "גזור מה-sourceTab", כמו קודם.
@@ -80,6 +80,9 @@ class CommentatorsTab extends OpenedTab {
           scrollController: scrollController,
           positionsListener: positionsListener,
         );
+    if (disposeSourceTabOnDispose) {
+      _sourceTabOwnership = SourceTabOwnership(sourceTab)..retain();
+    }
   }
 
   /// שחזור מ-JSON — יוצר sourceTab מדומה על בסיס הנתונים השמורים
@@ -141,16 +144,16 @@ class CommentatorsTab extends OpenedTab {
   ///
   /// ⚠️ בלי זה שחרור טאב הספר משאיר את הכרטיסיה הזו מצביעה על `bloc`
   /// ו-`currentTitle` משוחררים — ורצועת הכרטיסיות עצמה מאזינה להם.
-  void assumeSourceTabOwnership() {
-    _disposeSourceTabOnDispose = true;
+  void assumeSourceTabOwnership(SourceTabOwnership ownership) {
+    assert(identical(ownership.sourceTab, sourceTab));
+    _sourceTabOwnership = ownership..retain();
   }
 
   @override
   void dispose() {
     bloc.close();
-    if (_disposeSourceTabOnDispose) {
-      sourceTab.dispose();
-    }
+    _sourceTabOwnership?.release();
+    _sourceTabOwnership = null;
     super.dispose();
   }
 

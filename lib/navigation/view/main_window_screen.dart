@@ -2973,7 +2973,12 @@ class MainWindowScreenState extends State<MainWindowScreen>
             listener: (context, state) {
               final windowListener = appWindowListener;
               if (windowListener != null) {
-                unawaited(windowListener.closeIfEmptied());
+                final tabsBloc = context.read<TabsBloc>();
+                unawaited(
+                  windowListener.closeIfEmptied(
+                    isStillEmpty: () => !tabsBloc.state.hasOpenTabs,
+                  ),
+                );
               }
             },
           ),

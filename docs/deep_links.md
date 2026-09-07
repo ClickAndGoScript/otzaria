@@ -166,7 +166,7 @@ otzaria://library/reindex
 הפקודה מזוהה גם כ-`--info` וכ-`/info`. הנרמול חייב להישאר זהה בשני הצדדים — `normalizeCliCommand` ב-[`lib/core/cli_command.dart`](../lib/core/cli_command.dart) מול `IsCliInvocation` ב-[`windows/runner/main.cpp`](../windows/runner/main.cpp); פער ביניהם מייצר מופע שני שדילג על המנעול ועולה כאפליקציה מלאה בלי חלון, ולכן [`test/core/cli_command_test.dart`](../test/core/cli_command_test.dart) קורא את קובץ ה-C++ ואוכף את השקילות.
 
 ```text
-otzaria.exe info                     # דוח מלא
+otzaria.exe info                     # דוח כללי מהיר
 otzaria.exe info app                 # מקטע אחד
 otzaria.exe info errors --limit=20
 otzaria.exe info folders             # תיקיות אישיות + קובצי הספרים שבהן
@@ -214,7 +214,7 @@ var json2 = File.ReadAllText(path);   // רק ה-JSON, בלי newline נגרר
 
 הפלט זהה בדיוק לזה שבפופאפ — שני הערוצים קוראים ל-[`AppInfoService.collect`](../lib/core/info/app_info_service.dart), ורק מקור רשימת התוספים שונה (BLoC בממשק, `PluginRegistryRepository` ב-CLI).
 
-**בחירת הנושא היא גם בקרת הביצועים:** `app`, `plugins` ו-`errors` אינם נוגעים בספרייה ומחזירים מיד. `library` טוען את קטלוג הספרייה מ-`seforim.db`, ולכן לוקח כמה שניות. `folders` אינו נוגע ב-DB כלל אך **סורק את הדיסק** — הוא עובר רקורסיבית על כל תיקייה אישית, ולכן משכו נגזר ממספר הקבצים שבהן. `all` כולל את שניהם. להאצה: `--files=0` (או `?files=0`) חוסך את בניית רשימת הקבצים, אבל לא את המעבר עצמו — הספירות דורשות אותו.
+**בחירת הנושא היא גם בקרת הביצועים:** `app`, `plugins` ו-`errors` אינם נוגעים בספרייה ומחזירים מיד. `library` טוען את קטלוג הספרייה מ-`seforim.db`, ולכן לוקח כמה שניות. `folders` אינו נוגע ב-DB כלל אך **סורק את הדיסק** — הוא עובר רקורסיבית על כל תיקייה אישית, ולכן משכו נגזר ממספר הקבצים שבהן. `all` אינו סורק תיקיות; כדי לקבל אותן יש לבקש `folders` במפורש. `--files=0` (או `?files=0`) חוסך את בניית רשימת הקבצים, אבל לא את המעבר עצמו — הספירות דורשות אותו.
 
 **איך ה-CLI קורא את ההגדרות בזמן שאוצריא פתוחה:** Hive נועל את תיבת ההגדרות בלעדית לכל התהליך (`app_preferences.lock` לצד הקובץ), ולכן תהליך שני שינסה לפתוח אותה ייכשל. [`SettingsSnapshot`](../lib/core/info/settings_snapshot.dart) מעתיק את קובץ התיבה לתיקייה זמנית ופותח את **העותק**; ה-`Settings` שנבנה מעליו הוא קריאה-בלבד (`ReadOnlySettingsCache`, כל ה-setters הם no-op). התיבה החיה אינה נפתחת ואינה משתנה. אם אין תיבה או שהקריאה נכשלה — `Settings` מאותחל ריק, הדוח נופל לנתיבי ברירת המחדל, ו-`settingsLoaded: false` מסמן זאת.
 
@@ -226,7 +226,7 @@ var json2 = File.ReadAllText(path);   // רק ה-JSON, בלי newline נגרר
 
 | כתובת | תוצאה |
 |--------|--------|
-| `otzaria://info` | דוח מלא — תוכנה + ספרייה + תיקיות אישיות + תוספים + שגיאות |
+| `otzaria://info` | דוח כללי — תוכנה + ספרייה + תוספים + שגיאות |
 | `otzaria://info/all` | זהה ל-`otzaria://info` |
 | `otzaria://info/app` | מידע על התוכנה |
 | `otzaria://info/library` | מידע על הספרייה |

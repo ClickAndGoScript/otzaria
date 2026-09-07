@@ -198,13 +198,14 @@ class AppWindowListener extends WindowListener {
   /// ורצף הסגירה — ה-flush, מחיקת הסשן והסגירה עצמה — הוא בדיוק מה שצריך
   /// להיות ניתן לבדיקה.
   @visibleForTesting
-  Future<void> handleWindowClose() async {
+  Future<void> handleWindowClose({bool Function()? canClose}) async {
     if (_isClosing) {
       return;
     }
+    if (canClose != null && !canClose()) return;
     // לפני _isClosing וכלב-השמירה: ביטול חייב להשאיר את התוכנה שלמה.
     if (!await confirmAppCloseWithUnsavedChanges()) return;
-    if (_isClosing) {
+    if (_isClosing || (canClose != null && !canClose())) {
       return;
     }
     _isClosing = true;
@@ -254,12 +255,12 @@ class AppWindowListener extends WindowListener {
   ///
   /// ⚠️ לא כשזה החלון הגלוי האחרון: [handleWindowClose] היה מזהה אותו כאחרון
   /// ומכבה את התהליך, בעוד המשתמש רק רוקן חלון וציפה לראות את הספרייה.
-  Future<void> closeIfEmptied() async {
+  Future<void> closeIfEmptied({bool Function()? isStillEmpty}) async {
     if (!WindowRole.isSecondary || _isClosing) return;
     // `null` הוא "לא ידוע" — חלון ריק עדיף על סגירה בניחוש.
     final info = await const MultiWindowService().windowCount();
     if (info == null || info.count <= 1) return;
-    await handleWindowClose();
+    await handleWindowClose(canClose: isStillEmpty);
   }
 
   /// הצעדים שקודמים ל-flush — כולם פר-תהליך.

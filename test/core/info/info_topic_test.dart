@@ -32,11 +32,10 @@ void main() {
   });
 
   group('InfoTopic.sections', () {
-    test('all מתפרס לכל שאר הנושאים בסדר קבוע', () {
+    test('all מתפרס לנושאים המהירים בסדר קבוע', () {
       expect(InfoTopic.all.sections, [
         InfoTopic.app,
         InfoTopic.library,
-        InfoTopic.folders,
         InfoTopic.plugins,
         InfoTopic.errors,
       ]);

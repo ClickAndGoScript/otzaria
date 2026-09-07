@@ -43,7 +43,7 @@ class AppInfoCliRequest {
 /// זהו ערוץ הפלט היחיד שתוכנה חיצונית יכולה לצרוך סינכרונית: הפעלת
 /// `otzaria://info/...` דרך ה-OS היא חד-כיוונית ואינה מחזירה דבר לקורא.
 ///
-///     otzaria.exe info                 # דוח מלא
+///     otzaria.exe info                 # דוח כללי מהיר
 ///     otzaria.exe info app             # מקטע אחד
 ///     otzaria.exe info errors --limit=20
 ///     otzaria.exe info folders --files=0  # ספירות בלי רשימת קבצים
@@ -212,7 +212,7 @@ class AppInfoCli {
       ..writeln('מדפיס דוח JSON על ההתקנה ל-stdout ויוצא. ללא חלון וללא ממשק.')
       ..writeln()
       ..writeln('נושאים:')
-      ..writeln('  all       (ברירת מחדל) כל המקטעים שלהלן')
+      ..writeln('  all       (ברירת מחדל) כל המקטעים המהירים שלהלן')
       ..writeln('  app       גרסה, תאריכי התקנה/עדכון, סוג התקנה וחשבון')
       ..writeln('  library   גרסת ספרייה, תאריך עדכון ומספרי ספרים')
       ..writeln('  folders   תיקיות הספרים האישיים וקובצי הספרים שבהן')

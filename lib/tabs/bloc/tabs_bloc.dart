@@ -118,30 +118,29 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
         Future<void>.value();
   }
 
-  /// מעביר בעלות על [pane] לכרטיסיית מפרשים ששורדת ומחזיקה אותו כ-`sourceTab`.
-  ///
-  /// ⚠️ כרטיסיית מפרשים שנפתחה מהספר החי מחזיקה את טאב הספר **עצמו**, בלי
-  /// בעלות. שחרורו מתחתיה משאיר notifiers משוחררים שרצועת הכרטיסיות קוראת.
+  /// מעביר בעלות משותפת על [pane] לכרטיסיות המפרשים ששורדות.
   bool _transferSourceTabOwnership(OpenedTab pane) {
+    final ownership = SourceTabOwnership(pane);
+    var transferred = false;
     for (final survivor in state.tabs) {
       for (final surviving in leafPanes(survivor)) {
         if (surviving is CommentatorsTab &&
             identical(surviving.sourceTab, pane)) {
-          surviving.assumeSourceTabOwnership();
-          return true;
+          surviving.assumeSourceTabOwnership(ownership);
+          transferred = true;
         }
         if (surviving is PdfCommentatorsTab &&
             identical(surviving.sourceTab, pane)) {
-          surviving.assumeSourceTabOwnership();
-          return true;
+          surviving.assumeSourceTabOwnership(ownership);
+          transferred = true;
         }
       }
     }
-    return false;
+    return transferred;
   }
 
   void _disposeTabLater(OpenedTab tab) {
-    // חלונית שכרטיסיית מפרשים ששרדה ירשה אינה משוחררת; אחיותיה כן.
+    // חלונית שמפרשים ששרדו מחזיקים בה אינה משוחררת; אחיותיה כן.
     final inherited = leafPanes(tab).where(_transferSourceTabOwnership).toSet();
     if (inherited.isEmpty) {
       unawaited(

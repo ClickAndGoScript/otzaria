@@ -144,6 +144,14 @@ void main() {
       );
     });
 
+    test('לא נסגר אם נפתחה כרטיסייה בזמן בדיקת החלונות', () async {
+      asSecondaryWindow();
+
+      await AppWindowListener().closeIfEmptied(isStillEmpty: () => false);
+
+      expect(runner.closeSelfCalls, 0);
+    });
+
     test('החלון הראשי נשאר פתוח — אפס כרטיסיות הוא מצב הספרייה שלו', () async {
       await AppWindowListener().closeIfEmptied();
 

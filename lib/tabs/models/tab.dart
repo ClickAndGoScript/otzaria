@@ -256,3 +256,20 @@ abstract class OpenedTab {
   }
   Map<String, dynamic> toJson();
 }
+
+/// מחזיק טאב מקור חי עד שכל הכרטיסיות התלויות בו נסגרות.
+class SourceTabOwnership {
+  SourceTabOwnership(this.sourceTab);
+
+  final OpenedTab sourceTab;
+  int _leases = 0;
+
+  void retain() {
+    _leases++;
+  }
+
+  void release() {
+    if (_leases == 0 || --_leases != 0) return;
+    sourceTab.dispose();
+  }
+}

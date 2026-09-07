@@ -206,7 +206,9 @@ void main() {
       expect(find.text('התיקייה לא נמצאה'), findsOneWidget);
     });
 
-    testWidgets('בלי תיקיות מוגדרות מוצגת הודעה ולא רשימה ריקה', (tester) async {
+    testWidgets('בלי תיקיות מוגדרות מוצגת הודעה ולא רשימה ריקה', (
+      tester,
+    ) async {
       await pumpContent(
         tester,
         reportOf(InfoTopic.folders, foldersSection(folders: const [])),
@@ -298,13 +300,12 @@ void main() {
   });
 
   group('דוח מלא', () {
-    testWidgets('all מציג את כל חמשת המקטעים', (tester) async {
+    testWidgets('all מציג את ארבעת המקטעים הקלים', (tester) async {
       await pumpContent(
         tester,
         reportOf(InfoTopic.all, {
           'app': {'version': '0.3.2'},
           'library': {'version': '3.1.4'},
-          'folders': {'configuredCount': 0, 'folders': const []},
           'plugins': {'installedCount': 0, 'installed': const []},
           'errors': {'totalEntries': 0, 'recent': const []},
         }),
@@ -312,7 +313,7 @@ void main() {
 
       expect(find.text('מידע על התוכנה'), findsOneWidget);
       expect(find.text('מידע על הספרייה'), findsOneWidget);
-      expect(find.text('תיקיות ספרים אישיים'), findsOneWidget);
+      expect(find.text('תיקיות ספרים אישיים'), findsNothing);
       expect(find.text('מידע על התוספים'), findsOneWidget);
       expect(find.text('השגיאות האחרונות'), findsOneWidget);
     });
