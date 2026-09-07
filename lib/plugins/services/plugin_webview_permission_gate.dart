@@ -17,6 +17,7 @@ class PluginWebViewPermissionGate {
   /// משתמשים בערך המחרוזת כי `PermissionResourceType.==` אינו סימטרי.
   static const Map<String, String> requirements = {
     'CLIPBOARD_READ': pluginClipboardReadPermission,
+    'LOCAL_FONTS': pluginLocalFontsPermission,
   };
 
   /// התשובה לבקשה של [request], אחרי בדיקת המניפסט וההענקה שנשמרה.

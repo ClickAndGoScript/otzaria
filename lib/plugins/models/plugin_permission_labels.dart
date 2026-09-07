@@ -338,6 +338,16 @@ const Map<String, PluginPermissionInfo> _permissionLabels = {
     description: 'יצירת קיצור דרך בשולחן העבודה או בתפריט ההתחל (לאחר אישור)',
   ),
 
+  // ===== גופנים =====
+  'fonts.local.read': PluginPermissionInfo(
+    label: 'רשימת הגופנים המותקנים',
+    icon: FluentIcons.text_font_24_regular,
+    description:
+        'מנייה של הגופנים המותקנים במחשב, עם השם המלא של כל אחד וקובץ הגופן '
+        'עצמו. נדרשת לבורר גופנים שמציג את כל הגופנים בשמם הנכון ומצייר כל '
+        'אחד מהם באמת. אינה חושפת קבצים אחרים ואינה מאפשרת כתיבה.',
+  ),
+
   // ===== לוח העתקה =====
   'clipboard.read': PluginPermissionInfo(
     label: 'קריאת לוח ההעתקה',
