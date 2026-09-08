@@ -1179,7 +1179,9 @@ class _CombinedViewState extends State<CombinedView> {
       ];
     }
 
-    _prefetchParagraphCommentators(state, paragraphIndex);
+    if (state.availableCommentators.isNotEmpty) {
+      _prefetchParagraphCommentators(state, paragraphIndex);
+    }
 
     final paragraphLinks = buildCombinedViewContextMenuLinksForParagraph(
       linksByLine: state.linksByLine,

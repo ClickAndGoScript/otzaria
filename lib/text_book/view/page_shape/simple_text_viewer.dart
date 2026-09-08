@@ -1714,7 +1714,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
     Offset tapPosition,
     String? capturedText,
   ) {
-    if (widget.isMainText) {
+    if (widget.isMainText && state.availableCommentators.isNotEmpty) {
       _prefetchParagraphCommentators(state, index);
     }
     List<AppContextMenuEntry> commentatorItems = [];
