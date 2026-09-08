@@ -25,3 +25,10 @@ String? pluginSaveTargetPath({
   if (p.dirname(target) != root || p.basename(target) != fileName) return null;
   return target;
 }
+
+/// כותרת לדיאלוג בחירת התיקייה בשלב הראשון של „שמור בשם” של תוסף.
+String pluginSaveFolderDialogTitle(String? pluginTitle) {
+  final trimmed = pluginTitle?.trim();
+  if (trimmed == null || trimmed.isEmpty) return 'בחירת תיקייה לשמירת הקובץ';
+  return 'בחירת תיקייה — $trimmed';
+}

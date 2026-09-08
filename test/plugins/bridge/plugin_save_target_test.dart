@@ -52,4 +52,40 @@ void main() {
       expect(p.dirname(target!), folder);
     });
   });
+
+  group('pluginSaveFolderDialogTitle', () {
+    test('שם השלב קודם לכותרת שהתוסף שלח', () {
+      expect(
+        pluginSaveFolderDialogTitle('שמירת המסמך'),
+        'בחירת תיקייה — שמירת המסמך',
+      );
+      // רווחים בקצה הכותרת אינם נראים בדיאלוג, אבל כן נראים כאן.
+      expect(
+        pluginSaveFolderDialogTitle('  ייצוא ל-PDF  '),
+        'בחירת תיקייה — ייצוא ל-PDF',
+      );
+    });
+
+    test('כותרת ריקה נופלת לכותרת הקבועה של השלב', () {
+      for (final value in [null, '', '   ']) {
+        expect(
+          pluginSaveFolderDialogTitle(value),
+          'בחירת תיקייה לשמירת הקובץ',
+          reason: 'הכותרת "$value" אינה אמורה להגיע לדיאלוג',
+        );
+      }
+    });
+
+    test('כל כותרת פותחת ב„בחירת תיקייה”', () {
+      // זו הרגרסיה עצמה: כותרת שאינה אומרת „תיקייה” הובילה משתמשים להקליד
+      // שם קובץ בבורר התיקיות, ומשם ל-„Path does not exist” של Windows.
+      for (final title in [null, 'שמירת המסמך', 'ייצוא לספר אוצריא']) {
+        expect(
+          pluginSaveFolderDialogTitle(title),
+          startsWith('בחירת תיקייה'),
+          reason: 'הכותרת "$title" אינה מסמנת שהחלון מבקש תיקייה',
+        );
+      }
+    });
+  });
 }

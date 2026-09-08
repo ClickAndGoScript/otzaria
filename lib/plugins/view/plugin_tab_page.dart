@@ -389,7 +389,7 @@ class _PluginTabPageState extends State<PluginTabPage> {
             if (!await verifySaferModePassword(context)) return null;
             if (!mounted) return null;
             final folder = await FilePicker.getDirectoryPath(
-              dialogTitle: title ?? 'בחירת תיקייה לשמירת הקובץ',
+              dialogTitle: pluginSaveFolderDialogTitle(title),
               windowsOptions: kModalWindowsOptions,
               linuxOptions: kModalLinuxOptions,
             );

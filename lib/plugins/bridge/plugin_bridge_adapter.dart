@@ -4067,7 +4067,7 @@ class PluginBridgeAdapter {
       return null;
     }
     final folder = await FilePicker.getDirectoryPath(
-      dialogTitle: title ?? 'בחירת תיקייה לשמירת הקובץ',
+      dialogTitle: pluginSaveFolderDialogTitle(title),
       windowsOptions: kModalWindowsOptions,
       linuxOptions: kModalLinuxOptions,
     );
