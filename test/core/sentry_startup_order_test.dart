@@ -1,0 +1,25 @@
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  test('אתחול Sentry ממתין לחשיפת החלון ללא timeout', () {
+    final source = File('lib/main.dart').readAsStringSync();
+    final start = source.indexOf('Future<void> _initializeSentry() async {');
+    final end = source.indexOf('Future<void> _runAppBootstrap()', start);
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+
+    final initializer = source.substring(start, end);
+    const revealWait = 'await _mainWindowRevealedCompleter.future;';
+    expect(initializer, contains(revealWait));
+    expect(
+      initializer,
+      isNot(contains('_mainWindowRevealedCompleter.future.timeout')),
+    );
+    expect(
+      initializer.indexOf(revealWait),
+      lessThan(initializer.indexOf('SentryFlutter.init(')),
+    );
+  });
+}

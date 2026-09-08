@@ -171,6 +171,18 @@ void main() {
     },
   );
 
+  test('onVerifyProgress מדווח את גודל המחולץ בסיום האימות', () async {
+    final reports = <(int, int)>[];
+    await build().downloadAndExtract(
+      patchFile: entry(),
+      downloadUrl: 'https://x/patch-v1-v2.db.zst',
+      destDir: tmp,
+      onVerifyProgress: (done, total) => reports.add((done, total)),
+    );
+    expect(reports, isNotEmpty);
+    expect(reports.last, (uncompressed.length, uncompressed.length));
+  });
+
   test('גודל מחולץ שגוי → PatchDownloadException', () async {
     await expectLater(
       build().downloadAndExtract(

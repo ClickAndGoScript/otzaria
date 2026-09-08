@@ -225,10 +225,30 @@ void main() {
         expect(action, isA<OpenBookAction>());
         final book = action as OpenBookAction;
         expect(book.bookId, 1234);
+        expect(book.isUserBook, isFalse);
         expect(book.index, isNull);
         expect(book.searchQuery, isNull);
         expect(book.markSection, isFalse);
         expect(book.markText, isNull);
+      });
+
+      test('source=user מזהה ספר משתמש', () {
+        final action =
+            ExternalUriRouter.parseUri(
+                  Uri.parse('otzaria://open/book/1234?source=user'),
+                )
+                as OpenBookAction;
+
+        expect(action.isUserBook, isTrue);
+      });
+
+      test('source לא מוכר נדחה', () {
+        expect(
+          ExternalUriRouter.parseUri(
+            Uri.parse('otzaria://open/book/1234?source=unknown'),
+          ),
+          isNull,
+        );
       });
 
       test('מפענח index ו-q בפתיחת ספר', () {
@@ -348,6 +368,16 @@ void main() {
         final pdf = action as OpenPdfBookAction;
         expect(pdf.bookId, 1234);
         expect(pdf.page, isNull);
+      });
+
+      test('source=user מזהה ספר PDF אישי', () {
+        final action =
+            ExternalUriRouter.parseUri(
+                  Uri.parse('otzaria://open/pdf/1234?source=user'),
+                )
+                as OpenPdfBookAction;
+
+        expect(action.isUserBook, isTrue);
       });
 
       test('מפענח index כעמוד התחלתי (1-based)', () {

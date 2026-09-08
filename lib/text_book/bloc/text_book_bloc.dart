@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:otzaria/core/error_log_file.dart';
 import 'package:bloc_concurrency/bloc_concurrency.dart';
 import 'package:flutter/animation.dart';
 import 'package:flutter/scheduler.dart';
@@ -112,6 +113,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
   List<String>? _cachedPageShapeTargetBookTitles;
   bool _isLoadingLinks = false;
   bool _pendingLinksReload = false;
+  int _linksLoadGeneration = 0;
 
   /// האם הטאב שמציג את ה-bloc נראה כרגע (ראו [SetTabVisibility]).
   bool _isTabVisible = true;
@@ -1534,6 +1536,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
   }
 
   void _resetLoadedLinksWindow(TextBook book) {
+    _linksLoadGeneration++;
     _loadedLinksBookTitle = book.title;
     _loadedLinksStart = null;
     _loadedLinksEnd = null;
@@ -1541,6 +1544,8 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     _activeLinksTargetBookTitlesSignature = null;
     _isLoadingLinks = false;
     _pendingLinksReload = false;
+    _pendingForceLoadIndices = null;
+    _pendingForceLoadAll = false;
   }
 
   ({int start, int end}) _calculateLinksWindow(List<int> visibleIndices) {
@@ -2703,6 +2708,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     bool forceLoadAll = false,
     String? workspaceId,
   }) async {
+    final loadGeneration = _linksLoadGeneration;
     final runtimeStateBeforeWindowCheck = state;
     if (!force &&
         runtimeStateBeforeWindowCheck is TextBookLoaded &&
@@ -2744,7 +2750,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
       }
     }
 
-    if (isClosed) return;
+    if (isClosed || loadGeneration != _linksLoadGeneration) return;
 
     if (!force &&
         _isLinksWindowSufficient(
@@ -2773,6 +2779,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
         targetBookTitles: targetBookTitles,
       );
 
+      if (loadGeneration != _linksLoadGeneration) return;
       if (isClosed || state is! TextBookLoaded) {
         _isLoadingLinks = false;
         return;
@@ -2814,43 +2821,83 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
           latestWindow.end,
           targetBookTitlesSignature,
         );
-        if (_pendingLinksReload || windowOutdated) {
-          // אם ממתין טעינה מאולצת (LoadAllLinksForIndices), השתמש ב-indices שנשמרו
-          final pendingIndices = _pendingForceLoadIndices;
-          final pendingForce = _pendingForceLoadAll;
-          _pendingForceLoadIndices = null;
-          _pendingForceLoadAll = false;
-          if (pendingForce && pendingIndices != null) {
+        final pendingReload = _pendingLinksReload;
+        final pendingIndices = _pendingForceLoadIndices;
+        final pendingForce = _pendingForceLoadAll;
+        _clearPendingLinksReload();
+        if (pendingForce && pendingIndices != null) {
+          unawaited(
             _loadLinksInBackground(
               latestState.book,
               pendingIndices,
               force: true,
               forceLoadAll: true,
-            );
-          } else if (!forceLoadAll) {
-            // במצב forceLoadAll (כרטסיית מפרשים עצמאית), אין לבצע תיקון windowOutdated
-            // כי visibleIndices תקוע ב-startIndex ותיקון כזה יחליף את ה-commentary
-            // links שנטענו זה עתה ב-links ריקים (targetBookTitles=[]).
+            ),
+          );
+        } else if (!forceLoadAll && (pendingReload || windowOutdated)) {
+          // ב-forceLoadAll אין לתקן visibleIndices: הם שייכים למסלול אחר.
+          unawaited(
             _loadLinksInBackground(
               latestState.book,
               latestState.visibleIndices,
               workspaceId: workspaceId,
-            );
-          }
+            ),
+          );
         }
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      if (loadGeneration != _linksLoadGeneration) return;
       _isLoadingLinks = false;
       if (!isClosed) {
         add(const SetLinksLoading(false));
       }
-      if (kDebugMode) {
-        debugPrint(
-          '⚠️ TextBookBloc::loadLinks failed for ${book.title} '
-          '(window ${window.start}-${window.end}): $e',
+      try {
+        ErrorLogFile.append(
+          title: 'כשל בטעינת קישורי ספר',
+          error: e,
+          stackTrace: stackTrace,
+          details: {
+            'book': book.title,
+            'window': '${window.start}-${window.end}',
+          },
+        );
+      } catch (_) {}
+
+      final currentState = state;
+      final pendingReload = _pendingLinksReload;
+      final pendingIndices = _pendingForceLoadIndices;
+      final pendingForce = _pendingForceLoadAll;
+      _clearPendingLinksReload();
+      if (isClosed ||
+          currentState is! TextBookLoaded ||
+          currentState.book.title != book.title) {
+        return;
+      }
+      if (pendingForce && pendingIndices != null) {
+        unawaited(
+          _loadLinksInBackground(
+            currentState.book,
+            pendingIndices,
+            force: true,
+            forceLoadAll: true,
+          ),
+        );
+      } else if (pendingReload) {
+        unawaited(
+          _loadLinksInBackground(
+            currentState.book,
+            currentState.visibleIndices,
+            workspaceId: workspaceId,
+          ),
         );
       }
     }
+  }
+
+  void _clearPendingLinksReload() {
+    _pendingLinksReload = false;
+    _pendingForceLoadIndices = null;
+    _pendingForceLoadAll = false;
   }
 
   Future<void> _onUpdateLinks(

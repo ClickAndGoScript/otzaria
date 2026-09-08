@@ -1295,6 +1295,7 @@ class _CombinedViewState extends State<CombinedView> {
             icon: FluentIcons.link_24_regular,
             submenuBuilder: () => buildDirectLinkSubmenuActions(
               bookId: state.book.id!,
+              isUserBook: state.book.isUserBook,
               index: paragraphIndex,
               selectedText: selectedText,
             ),

@@ -6,6 +6,27 @@ import 'package:otzaria/utils/book_link_builder.dart';
 import 'package:test/test.dart';
 
 void main() {
+  group('copy-direct-link — מקור הספר', () {
+    test('ספר משתמש מקבל source=user בכל סוגי הקישורים', () {
+      expect(
+        buildBookLink(7, isUserBook: true),
+        equals('otzaria://open/book/7?source=user'),
+      );
+      expect(
+        buildSectionLink(7, 3, isUserBook: true),
+        equals('otzaria://open/book/7?source=user&index=3'),
+      );
+      expect(
+        buildPdfPageLink(7, 2, isUserBook: true),
+        equals('otzaria://open/pdf/7?source=user&index=2'),
+      );
+    });
+
+    test('ברירת המחדל משמרת קישור רשמי ישן', () {
+      expect(buildBookLink(7), equals('otzaria://open/book/7'));
+    });
+  });
+
   group('copy-direct-link — buildBookLink', () {
     test('מחזיר פורמט נכון עבור bookId=1', () {
       expect(buildBookLink(1), equals('otzaria://open/book/1'));

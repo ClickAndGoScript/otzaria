@@ -341,7 +341,6 @@ void main(List<String> args) async {
     }
   }
 
-  // Start Sentry in parallel to avoid blocking app startup.
   unawaited(_initializeSentry());
 
   await _runAppBootstrap();
@@ -416,8 +415,15 @@ void _installGlobalErrorHandlers() {
 }
 
 Future<void> _initializeSentry() async {
+  // ⚠️ רק אחרי החשיפה: sentry_init (FFI סינכרוני) מפעיל את crashpad_handler.exe
+  // ומחכה לו; בסוכן סינון שמאט יצירת תהליכים זה חסם את ה-UI לדקות (issue #1192).
+  await _mainWindowRevealedCompleter.future;
+  // ה-uncloak רץ כ-task נייטיבי על אותו thread; חסימה לפניו משאירה את
+  // החלון בלתי-נראה (נמדד גם אחרי שני endOfFrame) — נותנים לו לרוץ קודם.
+  await Future<void>.delayed(const Duration(seconds: 2));
   try {
     final info = await PackageInfo.fromPlatform();
+    StartupTimeline.instance.mark('sentry:init');
     final currentBuild = int.tryParse(info.buildNumber.trim()) ?? 0;
 
     await SentryFlutter.init(
@@ -445,6 +451,7 @@ Future<void> _initializeSentry() async {
         };
       },
     );
+    StartupTimeline.instance.mark('sentry:initDone');
   } catch (error, stackTrace) {
     if (kDebugMode) {
       debugPrint('Sentry initialization failed: $error\n$stackTrace');

@@ -1980,7 +1980,12 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
               ? 'העתק קישור ישיר לספר זה'
               : 'העתק קישור ישיר (לא זמין לספר זה)',
           onPressed: state.book.id != null
-              ? () => copyLinkToClipboard(buildBookLink(state.book.id!))
+              ? () => copyLinkToClipboard(
+                  buildBookLink(
+                    state.book.id!,
+                    isUserBook: state.book.isUserBook,
+                  ),
+                )
               : null,
         ),
       ),
@@ -3252,7 +3257,9 @@ bool _handleGlobalKeyEvent(
       if (bookId == null) {
         UiSnack.showError(TextBookMessages.directLinkUnavailable);
       } else {
-        copyLinkToClipboard(buildBookLink(bookId));
+        copyLinkToClipboard(
+          buildBookLink(bookId, isUserBook: state.book.isUserBook),
+        );
       }
       return true;
     }
@@ -3260,7 +3267,13 @@ bool _handleGlobalKeyEvent(
       if (bookId == null) {
         UiSnack.showError(TextBookMessages.directLinkUnavailable);
       } else {
-        copyLinkToClipboard(buildSectionLink(bookId, index));
+        copyLinkToClipboard(
+          buildSectionLink(
+            bookId,
+            index,
+            isUserBook: state.book.isUserBook,
+          ),
+        );
       }
       return true;
     }
@@ -3268,14 +3281,25 @@ bool _handleGlobalKeyEvent(
       if (bookId == null) {
         UiSnack.showError(TextBookMessages.directLinkUnavailable);
       } else {
-        copyLinkToClipboard(buildSectionMarkLink(bookId, index));
+        copyLinkToClipboard(
+          buildSectionMarkLink(
+            bookId,
+            index,
+            isUserBook: state.book.isUserBook,
+          ),
+        );
       }
       return true;
     }
     if (ShortcutHelper.matchesShortcut(event, copyTextMarkLinkShortcut)) {
       final link = bookId == null
           ? null
-          : buildTextMarkLink(bookId, index, selectedTextForNote ?? '');
+          : buildTextMarkLink(
+              bookId,
+              index,
+              selectedTextForNote ?? '',
+              isUserBook: state.book.isUserBook,
+            );
       if (bookId == null) {
         UiSnack.showError(TextBookMessages.directLinkUnavailable);
       } else if (link == null) {

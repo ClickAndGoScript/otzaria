@@ -51,12 +51,14 @@ class OpenPluginAction extends ExternalUriAction {
 /// סדר עדיפות להדגשה: [markText] > [markSection] > [searchQuery].
 class OpenBookAction extends ExternalUriAction {
   final int bookId;
+  final bool isUserBook;
   final int? index;
   final String? searchQuery;
   final bool markSection;
   final String? markText;
   const OpenBookAction(
     this.bookId, {
+    this.isUserBook = false,
     this.index,
     this.searchQuery,
     this.markSection = false,
@@ -75,8 +77,13 @@ class OpenBookAction extends ExternalUriAction {
 /// [page] — מספר עמוד התחלתי (אופציונלי).
 class OpenPdfBookAction extends ExternalUriAction {
   final int bookId;
+  final bool isUserBook;
   final int? page;
-  const OpenPdfBookAction(this.bookId, {this.page});
+  const OpenPdfBookAction(
+    this.bookId, {
+    this.isUserBook = false,
+    this.page,
+  });
 
   /// `true` אם הקישור מציין במפורש עמוד. ראה [OpenBookAction.hasExplicitPosition].
   bool get hasExplicitPosition => page != null;
@@ -582,6 +589,11 @@ class ExternalUriRouter {
         return null;
       }
 
+      final source = queryParameters['source']?.trim().toLowerCase();
+      if (source != null && source != 'official' && source != 'user') {
+        return null;
+      }
+
       final indexParam = queryParameters['index']?.trim();
       final parsedIndex = indexParam == null || indexParam.isEmpty
           ? null
@@ -611,6 +623,7 @@ class ExternalUriRouter {
 
       return OpenBookAction(
         bookId,
+        isUserBook: source == 'user',
         index: index,
         searchQuery: searchQuery,
         markSection: markSection,
@@ -624,13 +637,22 @@ class ExternalUriRouter {
         return null;
       }
 
+      final source = queryParameters['source']?.trim().toLowerCase();
+      if (source != null && source != 'official' && source != 'user') {
+        return null;
+      }
+
       final indexParam = queryParameters['index']?.trim();
       final parsedIndex = int.tryParse(indexParam ?? '');
       final page = (parsedIndex != null && parsedIndex >= 1)
           ? parsedIndex
           : null;
 
-      return OpenPdfBookAction(bookId, page: page);
+      return OpenPdfBookAction(
+        bookId,
+        isUserBook: source == 'user',
+        page: page,
+      );
     }
 
     return null;

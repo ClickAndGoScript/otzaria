@@ -33,6 +33,7 @@
 #include "jump_list_manager.h"
 #include "drag_preview_window.h"
 #include "splash_window.h"
+#include "startup_watchdog.h"
 #include "utils.h"
 
 namespace {
@@ -1189,6 +1190,8 @@ bool FlutterWindow::OnCreate() {
           return;
         }
         if (call.method_name() == "close") {
+          // החלון נחשף — הניטור סיים את תפקידו.
+          startup_watchdog::RequestStop();
           // Defer the actual reveal until the engine *presents* the next
           // frame (raster output reaching the swapchain) — by then the
           // window is at its final size/state (Dart sends "close" after

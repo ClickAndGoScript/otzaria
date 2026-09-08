@@ -55,13 +55,15 @@
 | `otzaria://open/tool/<tool-id>` | פותח כרטיסיית כלי בעיון לפי מזהה מלא — תומך גם בתוספים |
 | `otzaria://open/plugin/<plugin-id>` | פותח כרטיסיית תוסף בעיון לפי מזהה התוסף |
 | `otzaria://open/tab/<index>` | מעבר לטאב פתוח לפי מיקומו (0-based). אינו פותח טאב חדש; אם המיקום לא קיים — מתעלם. נבנה אוטומטית ב-Jump List של שורת המשימות (Windows) |
-| `otzaria://open/book/<id>` | פותח ספר בעיון לפי מזהה מסד הנתונים |
-| `otzaria://open/book/<id>?index=<n>` | פותח את הספר בסעיף `n` (אינדקס לא שלילי). |
+| `otzaria://open/book/<id>` | פותח ספר טקסט רשמי לפי מזהה מסד הנתונים. |
+| `otzaria://open/book/<id>?source=user` | פותח ספר טקסט אישי לפי מזהה מסד הנתונים. |
+| `otzaria://open/book/<id>?index=<n>` | פותח ספר רשמי בסעיף `n` (אינדקס לא שלילי). הוסף `source=user&` לפני `index` לספר אישי. |
 | `otzaria://open/book/<id>?q=<text>` | פותח את הספר עם מחרוזת חיפוש להדגשה. ניתן לשלב עם `index`. |
 | `otzaria://open/book/<id>?index=<n>&mark` | פותח את הספר בסעיף `n` ומדגיש את כל רקע המקטע בצהוב. |
 | `otzaria://open/book/<id>?index=<n>&m=<text>` | פותח את הספר בסעיף `n` ומדגיש את הטקסט `text` בצהוב בתוך המקטע. |
-| `otzaria://open/pdf/<id>` | פותח ספר PDF לפי מזהה משותף עם ה-TextBook במסד הנתונים |
-| `otzaria://open/pdf/<id>?index=<n>` | פותח את ספר ה-PDF בעמוד `n` (מספר עמוד חיובי). |
+| `otzaria://open/pdf/<id>` | פותח ספר PDF רשמי לפי מזהה מסד הנתונים. |
+| `otzaria://open/pdf/<id>?source=user` | פותח ספר PDF אישי לפי מזהה מסד הנתונים. |
+| `otzaria://open/pdf/<id>?index=<n>` | פותח PDF רשמי בעמוד `n` (מספר עמוד חיובי). הוסף `source=user&` לפני `index` לספר אישי. |
 
 **דוגמאות:**
 
@@ -435,7 +437,7 @@ _externalActivationWatchSub = queueFile.parent.watch().listen((event) {
 | `OpenToolAction(String toolId)` | `otzaria://open/calendar`, `/daily`, `/shamor_zachor`, `/measurements`, `/aramaic_dictionary`, `/acronyms_dictionary`, `/gematria`, `/notes`, `/tool/<id>`, ... | לשונית כלי |
 | `OpenPluginAction(String pluginId)` | `otzaria://open/plugin/<plugin-id>` | פתיחת תוסף ישירות (גם לא-מוצמד) |
 | `SwitchToTabAction(int index)` | `otzaria://open/tab/<index>` | מעבר לטאב פתוח קיים לפי מיקומו (Jump List של Windows) |
-| `OpenBookAction(int bookId, {int? index, String? searchQuery, bool markSection, String? markText})` | `otzaria://open/book/<id>?index=<n>&q=<text>&mark&m=<text>` | ספר בעיון |
+| `OpenBookAction(int bookId, {bool isUserBook, int? index, String? searchQuery, bool markSection, String? markText})` | `otzaria://open/book/<id>?source=user&index=<n>&q=<text>&mark&m=<text>` | ספר בעיון; `source=user` נדרש לספר אישי, וקישור ללא `source` נשאר רשמי לתאימות לאחור |
 | `OpenSettingsTabAction({SettingsTab? tab})` | `otzaria://open/settings`, `/settings/design`, `/settings/text`, ... | פתיחת הגדרות, אופציונלית עם ניווט לטאב |
 | `OpenHistoryAction()` | `otzaria://open/history` | דיאלוג היסטוריה |
 | `OpenBookmarksAction()` | `otzaria://open/bookmarks` | דיאלוג סימניות |

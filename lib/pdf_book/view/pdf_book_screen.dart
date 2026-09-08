@@ -1937,7 +1937,12 @@ class _PdfBookScreenState extends State<PdfBookScreen>
                 if (bookId == null) {
                   UiSnack.showError(PdfMessages.directLinkUnavailableForBook);
                 } else {
-                  copyLinkToClipboard(buildPdfBookLink(bookId));
+                  copyLinkToClipboard(
+                    buildPdfBookLink(
+                      bookId,
+                      isUserBook: widget.tab.book.isUserBook,
+                    ),
+                  );
                 }
                 return KeyEventResult.handled;
               }
@@ -1950,7 +1955,13 @@ class _PdfBookScreenState extends State<PdfBookScreen>
                   final page =
                       widget.tab.pdfViewerController.pageNumber ??
                       widget.tab.pageNumber;
-                  copyLinkToClipboard(buildPdfPageLink(bookId, page));
+                  copyLinkToClipboard(
+                    buildPdfPageLink(
+                      bookId,
+                      page,
+                      isUserBook: widget.tab.book.isUserBook,
+                    ),
+                  );
                 }
                 return KeyEventResult.handled;
               }
@@ -4008,11 +4019,17 @@ class _PdfBookScreenState extends State<PdfBookScreen>
     if (window == null) return;
 
     final requestId = ++_linksWindowRequestId;
-    final loaded = await _linksRepository.getBookLinksInRange(
-      textBook,
-      startIndex: window.startLine - 1,
-      endIndex: window.endLine - 1,
-    );
+    late final List<otz_links.Link> loaded;
+    try {
+      loaded = await _linksRepository.getBookLinksInRange(
+        textBook,
+        startIndex: window.startLine - 1,
+        endIndex: window.endLine - 1,
+      );
+    } catch (e, stackTrace) {
+      debugPrint('Failed to load PDF links window: $e\n$stackTrace');
+      return;
+    }
     if (!mounted ||
         requestId != _linksWindowRequestId ||
         widget.tab.linksAreComplete) {
@@ -5218,8 +5235,12 @@ class _PdfBookScreenState extends State<PdfBookScreen>
                       widget: const SizedBox.shrink(),
                       icon: FluentIcons.link_24_regular,
                       tooltip: 'העתק קישור ישיר לספר זה',
-                      onPressed: () =>
-                          copyLinkToClipboard(buildPdfBookLink(bookId)),
+                      onPressed: () => copyLinkToClipboard(
+                        buildPdfBookLink(
+                          bookId,
+                          isUserBook: widget.tab.book.isUserBook,
+                        ),
+                      ),
                     ),
                     ActionButtonData(
                       widget: const SizedBox.shrink(),
@@ -5229,7 +5250,13 @@ class _PdfBookScreenState extends State<PdfBookScreen>
                         final page =
                             widget.tab.pdfViewerController.pageNumber ??
                             widget.tab.pageNumber;
-                        copyLinkToClipboard(buildPdfPageLink(bookId, page));
+                        copyLinkToClipboard(
+                          buildPdfPageLink(
+                            bookId,
+                            page,
+                            isUserBook: widget.tab.book.isUserBook,
+                          ),
+                        );
                       },
                     ),
                   ];
