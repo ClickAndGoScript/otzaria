@@ -482,6 +482,8 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
   int? _pendingDisplayModeRestoreLineIndex;
   final DictionaryLookupRepository _dictionaryLookupRepository =
       DictionaryLookupRepository.instance;
+  final ParagraphCommentatorsCache _paragraphCommentatorsCache =
+      ParagraphCommentatorsCache();
   List<Link>? _anchorStyleSourceLinks;
   Map<String, int> _anchorStyleCache = const {};
   Timer? _previewHoverTimer;
@@ -1072,6 +1074,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
     _selectionFocusNode.dispose();
     _keyboardFocusNode?.dispose();
     _siblingController?.dispose();
+    _paragraphCommentatorsCache.dispose();
     super.dispose();
   }
 
@@ -1711,6 +1714,9 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
     Offset tapPosition,
     String? capturedText,
   ) {
+    if (widget.isMainText && state.availableCommentators.isNotEmpty) {
+      _prefetchParagraphCommentators(state, index);
+    }
     List<AppContextMenuEntry> commentatorItems = [];
     if (!widget.isMainText && widget.bookTitle != null) {
       commentatorItems = _buildCommentatorSwitchMenu(state);
@@ -1853,6 +1859,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
           icon: OtzariaIcons.book_24_regular,
           enabled: state.availableCommentators.isNotEmpty,
           childrenBuilder: () => _buildCommentatorsMenuItems(state, index),
+          childrenRefreshStream: _paragraphCommentatorsCache.changes,
         ),
       );
       entries.add(
@@ -2169,6 +2176,10 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
     TextBookLoaded state,
     int index,
   ) {
+    final isLoading = _paragraphCommentatorsCache.isLoading(
+      state.book,
+      index,
+    );
     final showOpenPane = shouldShowOpenCommentatorsPaneEntry(
       hasSelectedCommentators: state.activeCommentators.isNotEmpty,
       showCommentaryAsExpansionTiles: false,
@@ -2194,9 +2205,12 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
         content: widget.content,
         paragraphIndex: index,
         linksByLine: state.linksByLine,
+        queriedCommentators: isLoading
+            ? const <String>[]
+            : _paragraphCommentatorsCache.value(state.book, index),
       ),
       commentatorGroups: state.commentatorGroups,
-      linksLoading: state.linksLoading,
+      linksLoading: state.linksLoading || isLoading,
       onOpenPane: showOpenPane && widget.onOpenCommentatorsPane != null
           ? () {
               selectClickedLine();
@@ -2214,6 +2228,22 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
         context.read<TextBookBloc>().add(UpdateCommentators(commentators));
         if (isAdding) widget.onOpenCommentatorsPane?.call();
       },
+    );
+  }
+
+  void _prefetchParagraphCommentators(TextBookLoaded state, int index) {
+    unawaited(
+      _paragraphCommentatorsCache
+          .prefetch(
+            repository: context.read<TextBookBloc>().repository,
+            book: state.book,
+            paragraphIndex: index,
+          )
+          .onError((error, stackTrace) {
+            debugPrint(
+              'שגיאה בטעינת מפרשי הפסקה: $error\n$stackTrace',
+            );
+          }),
     );
   }
 

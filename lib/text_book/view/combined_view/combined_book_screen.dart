@@ -274,6 +274,8 @@ typedef _CommentaryScrollTarget = ({
 
 class _CombinedViewState extends State<CombinedView> {
   bool _anchorHandledCurrentTap = false;
+  final ParagraphCommentatorsCache _paragraphCommentatorsCache =
+      ParagraphCommentatorsCache();
 
   final ValueNotifier<_CommentaryScrollTarget?> _anchorScrollTargetNotifier =
       ValueNotifier<_CommentaryScrollTarget?>(null);
@@ -939,6 +941,7 @@ class _CombinedViewState extends State<CombinedView> {
     _selectionManager.removeListener(_onSelectionModeChanged);
     _selectionManager.dispose();
     _siblingController.dispose();
+    _paragraphCommentatorsCache.dispose();
     super.dispose();
   }
 
@@ -1176,6 +1179,10 @@ class _CombinedViewState extends State<CombinedView> {
       ];
     }
 
+    if (state.availableCommentators.isNotEmpty) {
+      _prefetchParagraphCommentators(state, paragraphIndex);
+    }
+
     final paragraphLinks = buildCombinedViewContextMenuLinksForParagraph(
       linksByLine: state.linksByLine,
       paragraphIndex: paragraphIndex,
@@ -1193,34 +1200,46 @@ class _CombinedViewState extends State<CombinedView> {
       isCommentatorsTabActive: isCommentatorsTabActive,
     );
 
-    final commentatorChildren = buildCommentatorsContextMenuChildren(
-      activeCommentators: state.activeCommentators,
-      availableCommentators: paragraphCommentators(
-        availableCommentators: state.availableCommentators,
-        content: state.content,
-        paragraphIndex: paragraphIndex,
-        linksByLine: state.linksByLine,
-      ),
-      commentatorGroups: state.commentatorGroups,
-      linksLoading: state.linksLoading,
-      onOpenPane: shouldShowOpenPaneEntry
-          ? () {
-              _selectParagraphForContextMenu(paragraphIndex);
-              _openCommentatorsPane(isAdding: true);
-            }
-          : null,
-      onSelectMultiple: shouldShowSelectEntry
-          ? () {
-              _selectParagraphForContextMenu(paragraphIndex);
-              widget.onOpenCommentatorsPaneWithFilter!();
-            }
-          : null,
-      onCommentatorsChanged: (commentators, {required isAdding}) {
-        _selectParagraphForContextMenu(paragraphIndex);
-        context.read<TextBookBloc>().add(UpdateCommentators(commentators));
-        _openCommentatorsPane(isAdding: isAdding);
-      },
-    );
+    List<AppContextMenuEntry> buildCommentatorChildren() {
+      final isLoading = _paragraphCommentatorsCache.isLoading(
+        state.book,
+        paragraphIndex,
+      );
+      return buildCommentatorsContextMenuChildren(
+        activeCommentators: state.activeCommentators,
+        availableCommentators: paragraphCommentators(
+          availableCommentators: state.availableCommentators,
+          content: state.content,
+          paragraphIndex: paragraphIndex,
+          linksByLine: state.linksByLine,
+          queriedCommentators: isLoading
+              ? const <String>[]
+              : _paragraphCommentatorsCache.value(
+                  state.book,
+                  paragraphIndex,
+                ),
+        ),
+        commentatorGroups: state.commentatorGroups,
+        linksLoading: state.linksLoading || isLoading,
+        onOpenPane: shouldShowOpenPaneEntry
+            ? () {
+                _selectParagraphForContextMenu(paragraphIndex);
+                _openCommentatorsPane(isAdding: true);
+              }
+            : null,
+        onSelectMultiple: shouldShowSelectEntry
+            ? () {
+                _selectParagraphForContextMenu(paragraphIndex);
+                widget.onOpenCommentatorsPaneWithFilter!();
+              }
+            : null,
+        onCommentatorsChanged: (commentators, {required isAdding}) {
+          _selectParagraphForContextMenu(paragraphIndex);
+          context.read<TextBookBloc>().add(UpdateCommentators(commentators));
+          _openCommentatorsPane(isAdding: isAdding);
+        },
+      );
+    }
 
     final showOpenLinksPaneEntry = shouldShowOpenLinksPaneEntry(
       hasLinks: paragraphLinks.isNotEmpty,
@@ -1314,7 +1333,8 @@ class _CombinedViewState extends State<CombinedView> {
         label: kParagraphCommentatorsMenuLabel,
         icon: OtzariaIcons.book_24_regular,
         enabled: state.availableCommentators.isNotEmpty,
-        children: commentatorChildren,
+        childrenBuilder: buildCommentatorChildren,
+        childrenRefreshStream: _paragraphCommentatorsCache.changes,
       ),
       AppContextMenuEntry(
         label: 'קישורים',
@@ -1487,6 +1507,25 @@ class _CombinedViewState extends State<CombinedView> {
         ];
       }(),
     ];
+  }
+
+  void _prefetchParagraphCommentators(
+    TextBookLoaded state,
+    int paragraphIndex,
+  ) {
+    unawaited(
+      _paragraphCommentatorsCache
+          .prefetch(
+            repository: context.read<TextBookBloc>().repository,
+            book: state.book,
+            paragraphIndex: paragraphIndex,
+          )
+          .onError((error, stackTrace) {
+            debugPrint(
+              'שגיאה בטעינת מפרשי הפסקה: $error\n$stackTrace',
+            );
+          }),
+    );
   }
 
   /// פריטי תוסף להקשר `reader-highlight` — לחיצה ימנית על טקסט מודגש

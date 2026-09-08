@@ -1057,7 +1057,6 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
         Expanded(
           child: TabBarView(
             controller: _tabController,
-            physics: const NeverScrollableScrollPhysics(),
             children: [
               // מפתחות חייבים להישאר קבועים: מפתח תלוי-עמוד הורס את שלושת
               // התתי-עצים בכל דפדוף ומאפס את מטמוני התוכן שלהם.

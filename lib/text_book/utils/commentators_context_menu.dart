@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/foundation.dart';
+import 'package:otzaria/models/books.dart';
 import 'package:otzaria/models/link_types.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:otzaria/text_book/models/commentator_group.dart';
+import 'package:otzaria/text_book/text_book_repository.dart';
 import 'package:otzaria/text_book/utils/inline_notes_utils.dart'
     as inline_notes;
 import 'package:otzaria/utils/text/text_manipulation.dart'
@@ -12,16 +16,72 @@ import 'package:otzaria/widgets/misc/app_menu_exports.dart';
 /// כותרת תת-התפריט "מפרשים" בתפריט ההקשר של גוף הספר.
 const String kParagraphCommentatorsMenuLabel = 'מפרשים על פסקה זו';
 
-/// המפרשים מתוך [availableCommentators] שיש להם תוכן על הפסקה [paragraphIndex]
-/// (0-based): קישור-מפרש ב-[linksByLine] (ממופתח 1-based), או הערות inline
-/// בשורה עבור המפרש הוירטואלי [kNotesCommentatorTitle]. הסדר נשמר.
+/// מטמון את מפרשי הפסקה שנטענו בשאילת טווח.
+///
+/// [changes] מאפשר לתת־התפריט הפתוח להתעדכן כשהשאילתה מסתיימת.
+class ParagraphCommentatorsCache {
+  final Map<(Object, int), List<String>> _values = {};
+  final Set<(Object, int)> _pending = {};
+  final StreamController<Object?> _changes = StreamController.broadcast();
+
+  Stream<Object?> get changes => _changes.stream;
+
+  List<String>? value(TextBook book, int paragraphIndex) =>
+      _values[_key(book, paragraphIndex)];
+
+  bool isLoading(TextBook book, int paragraphIndex) =>
+      _pending.contains(_key(book, paragraphIndex));
+
+  Future<void> prefetch({
+    required TextBookRepository repository,
+    required TextBook book,
+    required int paragraphIndex,
+  }) async {
+    final key = _key(book, paragraphIndex);
+    if (_values.containsKey(key) || !_pending.add(key)) return;
+    try {
+      final links = await repository.getBookLinksInRange(
+        book,
+        startIndex: paragraphIndex,
+        endIndex: paragraphIndex,
+        targetBookTitles: null,
+      );
+      _values[key] = {
+        for (final link in links)
+          if (LinkTypes.isDependentTextLink(link.connectionType))
+            getTitleFromPath(link.path2),
+      }.toList();
+    } finally {
+      _pending.remove(key);
+      if (!_changes.isClosed) _changes.add(key);
+    }
+  }
+
+  (Object, int) _key(TextBook book, int paragraphIndex) => (
+    (
+      book.id,
+      book.title,
+      book.categoryId,
+      book.fileType,
+      book.versionTitle,
+    ),
+    paragraphIndex,
+  );
+
+  void dispose() => _changes.close();
+}
+
+/// המפרשים מתוך [availableCommentators] שיש להם תוכן על הפסקה [paragraphIndex].
+/// [queriedCommentators] מגיע משאילתת הטווח; [linksByLine] מצרף קישורים
+/// מקומיים, לרבות ספרי משתמש. הערות inline מצרפות את [kNotesCommentatorTitle].
 List<String> paragraphCommentators({
   required List<String> availableCommentators,
   required List<String> content,
   required int paragraphIndex,
   required Map<int, List<Link>> linksByLine,
+  List<String>? queriedCommentators,
 }) {
-  final onParagraph = <String>{};
+  final onParagraph = queriedCommentators?.toSet() ?? <String>{};
   for (final link in linksByLine[paragraphIndex + 1] ?? const <Link>[]) {
     if (!LinkTypes.isDependentTextLink(link.connectionType)) continue;
     onParagraph.add(getTitleFromPath(link.path2));

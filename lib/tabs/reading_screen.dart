@@ -47,7 +47,10 @@ import 'package:otzaria/widgets/widgets_exports.dart';
 import 'package:otzaria/tour/tour_target_keys.dart';
 
 class ReadingScreen extends StatefulWidget {
-  const ReadingScreen({super.key});
+  const ReadingScreen({super.key, this.onFindRefRequested});
+
+  /// פותח את חלונית איתור הספר דרך מעטפת החלון הראשי.
+  final VoidCallback? onFindRefRequested;
 
   /// עקיפה לבדיקות של זיהוי פלטפורמת מגע (physics ו-onPageChanged של מובייל).
   @visibleForTesting
@@ -403,11 +406,7 @@ class _ReadingScreenState extends State<ReadingScreen>
                         ActionButton.neutral(
                           text: 'איתור ספר',
                           icon: FluentIcons.search_24_regular,
-                          onPressed: () {
-                            context.read<NavigationBloc>().add(
-                              const NavigateToScreen(Screen.find),
-                            );
-                          },
+                          onPressed: widget.onFindRefRequested,
                         ),
                       ],
                     )

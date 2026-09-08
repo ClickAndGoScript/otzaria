@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   final source = File(
     'windows/runner/startup_watchdog.cpp',
-  ).readAsStringSync();
+  ).readAsStringSync().replaceAll('\r\n', '\n');
   final mainSource = File('windows/runner/main.cpp').readAsStringSync();
   final windowSource = File(
     'windows/runner/flutter_window.cpp',

@@ -1,10 +1,30 @@
+import 'dart:io';
+
+import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/core/app_paths.dart';
+import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
+import 'package:otzaria/data/data_providers/user_books_database_holder.dart';
+import 'package:otzaria/models/books.dart';
 import 'package:otzaria/models/links.dart';
+import 'package:otzaria/settings/settings_exports.dart';
 import 'package:otzaria/text_book/models/commentator_group.dart';
+import 'package:otzaria/text_book/text_book_repository.dart';
 import 'package:otzaria/text_book/utils/commentators_context_menu.dart';
+import 'package:otzaria/user_content_import/models/user_import_models.dart';
+import 'package:otzaria/user_content_import/repository/user_content_repository.dart';
 import 'package:otzaria/widgets/misc/app_menu_exports.dart';
+import 'package:path/path.dart' as path;
+
+import '../../test_helpers/memory_cache_provider.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(() async {
+    await Settings.init(cacheProvider: MemoryCacheProvider());
+  });
+
   const groups = [
     CommentatorGroup(title: 'ראשונים', commentators: ['רש"י', 'רמב"ן']),
     CommentatorGroup(title: 'אחרונים', commentators: ['מלבי"ם']),
@@ -226,6 +246,25 @@ void main() {
       expect(result, ['רמב"ן', 'מלבי"ם']);
     });
 
+    test('שאילת הטווח מציגה גם מפרש שאינו פעיל בתפריט', () {
+      final onParagraph = paragraphCommentators(
+        availableCommentators: const ['רש"י', 'רמב"ן'],
+        content: const ['פסקה'],
+        paragraphIndex: 0,
+        linksByLine: {
+          1: [commentaryLink(1, 'רש"י')],
+        },
+        queriedCommentators: const ['רש"י', 'רמב"ן'],
+      );
+      final entries = build(
+        active: const ['רש"י'],
+        availableCommentators: onParagraph,
+      );
+
+      expect(entryNamed(entries, 'רש"י').isSelected, isTrue);
+      expect(entryNamed(entries, 'רמב"ן').isSelected, isFalse);
+    });
+
     test('"הערות" נכלל רק כשיש הערות inline בפסקה', () {
       const available = ['רש"י', kNotesCommentatorTitle];
       const content = [
@@ -250,6 +289,57 @@ void main() {
         ),
         [kNotesCommentatorTitle],
       );
+    });
+  });
+
+  group('ParagraphCommentatorsCache — קישורי משתמש', () {
+    late Directory tempDir;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp(
+        'otzaria-paragraph-commentators-',
+      );
+      await UserBooksDatabaseHolder.instance.close();
+      AppPaths.debugOverrideDataRootPath(tempDir.path);
+      await Settings.setValue<String>(
+        SettingsRepository.keyDatabasesPath,
+        path.join(tempDir.path, 'databases'),
+      );
+    });
+
+    tearDown(() async {
+      await UserBooksDatabaseHolder.instance.close();
+      await Settings.setValue<String>(SettingsRepository.keyDatabasesPath, '');
+      AppPaths.debugOverrideDataRootPath(null);
+      if (await tempDir.exists()) await tempDir.delete(recursive: true);
+    });
+
+    test('שאילת הטווח כוללת מפרש משתמש שאינו פעיל', () async {
+      final userBooksRepository =
+          await UserBooksDatabaseHolder.instance.repository;
+      await UserContentRepository(userBooksRepository.database).upsertUserLink(
+        const UserLinkRecord(
+          sourceTitle: 'ספר בסיס',
+          sourceIsUserBook: false,
+          sourceLineIndex: 0,
+          targetTitle: 'מפרש אישי',
+          targetIsUserBook: true,
+          targetLineIndex: 0,
+          connectionType: 'COMMENTARY',
+        ),
+      );
+      final cache = ParagraphCommentatorsCache();
+      addTearDown(cache.dispose);
+      final repository = TextBookRepository(fileSystem: FileSystemData());
+      final book = TextBook(title: 'ספר בסיס');
+
+      await cache.prefetch(
+        repository: repository,
+        book: book,
+        paragraphIndex: 0,
+      );
+
+      expect(cache.value(book, 0), ['מפרש אישי']);
     });
   });
 

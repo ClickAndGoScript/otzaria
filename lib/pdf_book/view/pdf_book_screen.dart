@@ -190,6 +190,45 @@ Offset pdfTopAnchoredCenter({
   required double zoom,
 }) => Offset(currentCenter.dx, anchorDocTop + viewSize.height / 2 / zoom);
 
+/// עוגן חד־פעמי לשימור קו הראש בעת שינוי רוחב קורא ה-PDF.
+@visibleForTesting
+class PdfPaneToggleAnchor {
+  double? _docTop;
+  Size? _viewSize;
+
+  /// מכין עוגן לשינוי רוחב אמיתי, או מנקה עוגן קודם כשהחלונית היא overlay.
+  void prepare({
+    required bool changesReaderWidth,
+    double? docTop,
+    Size? viewSize,
+  }) {
+    _docTop = null;
+    _viewSize = null;
+    if (!changesReaderWidth || docTop == null || viewSize == null) return;
+    _docTop = docTop;
+    _viewSize = viewSize;
+  }
+
+  /// צורך את העוגן פעם אחת ומחזיר אותו רק לשינוי הרוחב התואם.
+  double? consume({
+    required Size? oldViewSize,
+    required Size newViewSize,
+    required bool isBookView,
+  }) {
+    final docTop = _docTop;
+    final capturedViewSize = _viewSize;
+    _docTop = null;
+    _viewSize = null;
+    if (docTop == null ||
+        oldViewSize != capturedViewSize ||
+        isBookView ||
+        oldViewSize!.width == newViewSize.width) {
+      return null;
+    }
+    return docTop;
+  }
+}
+
 /// מחזיר את מדיניות שינוי גודל ה-PDF לפי מצב התצוגה.
 @visibleForTesting
 PdfViewerSizeDelegateProvider pdfSizeDelegateProviderForLayoutMode(
@@ -524,13 +563,9 @@ class _PdfBookScreenState extends State<PdfBookScreen>
   bool _readerFocusAndHideQueued = false;
   bool _bookHasCommentaryLinks = false;
 
-  /// נקודת המסמך שהייתה בראש התצוגה רגע לפני שרוחב הקורא השתנה
-  /// (פתיחת/סגירת חלונית הצד), לשחזור אחריו.
-  double? _paneToggleAnchorDocTop;
-
-  /// גודל התצוגה שבו נלקח העוגן — מונע החלת עוגן ישן
-  /// על שינוי גודל אחר (במסך צר החלונית overlay והרוחב לא משתנה).
-  Size? _paneToggleAnchorViewSize;
+  final PdfPaneToggleAnchor _paneToggleAnchor = PdfPaneToggleAnchor();
+  bool _leftPaneUsesPushLayout = false;
+  bool _rightPaneUsesPushLayout = false;
 
   /// מצב יד — גרירת עכבר גוללת את הדף במקום לסמן טקסט (issue #916).
   bool _isHandMode = false;
@@ -690,41 +725,59 @@ class _PdfBookScreenState extends State<PdfBookScreen>
     if (current is PdfBookLoaded && current.showLeftPane == show) {
       return;
     }
-    _captureViewportTopAnchor();
+    _prepareViewportTopAnchor(
+      changesReaderWidth: _leftPaneUsesPushLayout,
+    );
     _bloc.add(pdf_events.ToggleLeftPane(show));
+  }
+
+  void _setRightPaneVisibility(bool show, {int? initialTabIndex}) {
+    final current = _bloc.state;
+    if (current is PdfBookLoaded && current.showRightPane == show) {
+      return;
+    }
+    _prepareViewportTopAnchor(
+      changesReaderWidth: _rightPaneUsesPushLayout,
+    );
+    _bloc.add(
+      pdf_events.ToggleRightPane(
+        show: show,
+        initialTabIndex: initialTabIndex,
+      ),
+    );
   }
 
   /// שומר את קו הראש של התצוגה לפני שינוי רוחב הקורא. מדיניות השינוי-גודל
   /// של pdfrx מעגנת את המרכז, ובזום שגדל התוצאה שנוּוט אליה נדחקת מהמסך.
-  void _captureViewportTopAnchor() {
-    final controller = widget.tab.pdfViewerController;
-    if (!controller.isReady || controller.layout.pageLayouts.isEmpty) {
-      _paneToggleAnchorDocTop = null;
-      _paneToggleAnchorViewSize = null;
+  void _prepareViewportTopAnchor({required bool changesReaderWidth}) {
+    if (!changesReaderWidth) {
+      _paneToggleAnchor.prepare(changesReaderWidth: false);
       return;
     }
-    _paneToggleAnchorDocTop = controller.visibleRect.top;
-    _paneToggleAnchorViewSize = controller.viewSize;
+    final controller = widget.tab.pdfViewerController;
+    if (!controller.isReady || controller.layout.pageLayouts.isEmpty) {
+      _paneToggleAnchor.prepare(changesReaderWidth: false);
+      return;
+    }
+    _paneToggleAnchor.prepare(
+      changesReaderWidth: true,
+      docTop: controller.visibleRect.top,
+      viewSize: controller.viewSize,
+    );
   }
 
-  /// מחזיר את קו הראש שנשמר ב-[_captureViewportTopAnchor], בזום שכבר נקבע
+  /// מחזיר את קו הראש שנשמר ב-[_prepareViewportTopAnchor], בזום שכבר נקבע
   /// על ידי מדיניות שינוי-הגודל (issue #1023).
   void _restoreViewportTopAnchor(
     PdfViewerController controller,
     Size? oldViewSize,
   ) {
-    final anchorDocTop = _paneToggleAnchorDocTop;
-    final anchorViewSize = _paneToggleAnchorViewSize;
-    _paneToggleAnchorDocTop = null;
-    _paneToggleAnchorViewSize = null;
-    // בתצוגת ספר העמוד ממורכז ומנורמל על ידי normalizeMatrix — אין שם
-    // גלילה חופשית לשמר.
-    if (anchorDocTop == null ||
-        oldViewSize != anchorViewSize ||
-        _isBookViewModeActive() ||
-        oldViewSize!.width == controller.viewSize.width) {
-      return;
-    }
+    final anchorDocTop = _paneToggleAnchor.consume(
+      oldViewSize: oldViewSize,
+      newViewSize: controller.viewSize,
+      isBookView: _isBookViewModeActive(),
+    );
+    if (anchorDocTop == null) return;
     // pdfrx מזהיר לא לשנות את המטריצה בתוך ה-callback — הוא נקרא תוך כדי build.
     Future.microtask(() {
       if (!mounted || !controller.isReady) return;
@@ -1035,7 +1088,7 @@ class _PdfBookScreenState extends State<PdfBookScreen>
       if (current is! PdfBookLoaded) return;
       final isOnCommentary = _currentRightPaneTabIndex == _kCommentaryTabIndex;
       if (current.showRightPane && isOnCommentary) {
-        _bloc.add(const pdf_events.ToggleRightPane(show: false));
+        _setRightPaneVisibility(false);
       } else {
         // בדומה ל-_openCommentaryPane: רישום interaction של TourCubit לפני
         // הפתיחה, כדי שטור/אונבורדינג ידע שהמשתמש השתמש במפרשים.
@@ -1044,7 +1097,7 @@ class _PdfBookScreenState extends State<PdfBookScreen>
           _rightPaneInitialTabIndex = _kCommentaryTabIndex;
           _currentRightPaneTabIndex = _kCommentaryTabIndex;
         });
-        _bloc.add(const pdf_events.ToggleRightPane(show: true));
+        _setRightPaneVisibility(true);
       }
     };
     widget.tab.toggleCommentatorsPaneNotifier.addListener(
@@ -1242,7 +1295,7 @@ class _PdfBookScreenState extends State<PdfBookScreen>
       _rightPaneInitialTabIndex = _kCommentaryTabIndex;
       _currentRightPaneTabIndex = _kCommentaryTabIndex;
     });
-    _bloc.add(const pdf_events.ToggleRightPane(show: true));
+    _setRightPaneVisibility(true);
   }
 
   void _openLinksPane() {
@@ -1250,7 +1303,7 @@ class _PdfBookScreenState extends State<PdfBookScreen>
       _rightPaneInitialTabIndex = _kLinksTabIndex;
       _currentRightPaneTabIndex = _kLinksTabIndex;
     });
-    _bloc.add(const pdf_events.ToggleRightPane(show: true));
+    _setRightPaneVisibility(true);
   }
 
   // פותחת את חלונית ההערות האישיות.
@@ -1266,7 +1319,7 @@ class _PdfBookScreenState extends State<PdfBookScreen>
     if (!isOpen) {
       _bloc.add(const pdf_events.UpdateRightPaneWidth(_kRightPaneNarrowWidth));
     }
-    _bloc.add(const pdf_events.ToggleRightPane(show: true));
+    _setRightPaneVisibility(true);
   }
 
   void _maybeRegisterPdfCommentaryOpportunity() {
@@ -3608,7 +3661,7 @@ class _PdfBookScreenState extends State<PdfBookScreen>
       return;
     }
     _didAutoOpenCommentary = true;
-    _bloc.add(const pdf_events.ToggleRightPane(show: true, initialTabIndex: 0));
+    _setRightPaneVisibility(true, initialTabIndex: 0);
     // פתיחה אוטומטית נחשבת כ"שימוש במפרשים" — מדכאת את טיפ "כדאי לפתוח מפרשים".
     _recordCommentaryOpenedIfNeeded();
   }
@@ -4339,6 +4392,9 @@ class _PdfBookScreenState extends State<PdfBookScreen>
                     minPaneWidth: 200,
                     maxPaneWidth: 600,
                     autoHandleResponsiveVisibility: false,
+                    onLayoutModeChanged: (usesPushLayout) {
+                      _leftPaneUsesPushLayout = usesPushLayout;
+                    },
                     onPaneWidthChanged: (nextWidth) {
                       _bloc.add(pdf_events.UpdateSidebarWidth(nextWidth));
                     },
@@ -4356,13 +4412,14 @@ class _PdfBookScreenState extends State<PdfBookScreen>
                       alignment: AlignmentDirectional.centerStart,
                       paneWidth: rightPaneWidth,
                       minMainContentWidth: 200,
-                      onClose: () => _bloc.add(
-                        const pdf_events.ToggleRightPane(show: false),
-                      ),
+                      onClose: () => _setRightPaneVisibility(false),
                       isResizable: true,
                       minPaneWidth: 250,
                       maxPaneWidth: 600,
                       autoHandleResponsiveVisibility: false,
+                      onLayoutModeChanged: (usesPushLayout) {
+                        _rightPaneUsesPushLayout = usesPushLayout;
+                      },
                       onPaneWidthChanged: (nextWidth) {
                         _bloc.add(pdf_events.UpdateRightPaneWidth(nextWidth));
                       },
@@ -4734,7 +4791,7 @@ class _PdfBookScreenState extends State<PdfBookScreen>
           openPreparedTab(context, tab, insertAdjacent: true),
       fontSize: settingsState.commentatorsFontSize,
       onClose: () {
-        _bloc.add(const pdf_events.ToggleRightPane(show: false));
+        _setRightPaneVisibility(false);
       },
       initialTabIndex: _rightPaneInitialTabIndex,
       onTabChanged: (index) {

@@ -104,6 +104,7 @@ PdfCommentaryPanel _panel(
   PdfBookTab tab, {
   bool linksLoading = false,
   int? initialTabIndex,
+  ValueChanged<int>? onTabChanged,
 }) => PdfCommentaryPanel(
   tab: tab,
   linksCount: tab.links.length,
@@ -111,6 +112,7 @@ PdfCommentaryPanel _panel(
   openBookCallback: (_) {},
   fontSize: 16.0,
   initialTabIndex: initialTabIndex,
+  onTabChanged: onTabChanged,
 );
 
 // ─── tests ───────────────────────────────────────────────────────────────────
@@ -120,6 +122,34 @@ void main() {
     WidgetsFlutterBinding.ensureInitialized();
     await Settings.init(cacheProvider: MemorySettingsCache());
     await text_utils.splitByEra(const []);
+  });
+
+  testWidgets('swipe אופקי מעביר מלשונית קישורים ללשונית מפרשים', (
+    tester,
+  ) async {
+    final tab = _tab(currentLine: 10);
+    addTearDown(tab.dispose);
+    final changedIndices = <int>[];
+
+    await tester.pumpWidget(
+      _wrap(
+        _panel(
+          tab,
+          initialTabIndex: 1,
+          onTabChanged: changedIndices.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('לא נמצאו קישורים לדף זה'), findsOneWidget);
+
+    await tester.drag(find.byType(TabBarView), const Offset(500, 0));
+    await tester.pumpAndSettle();
+
+    expect(changedIndices, [0]);
+    expect(find.text('לא נמצאו מפרשים לקטע הנבחר'), findsOneWidget);
+    expect(find.text('לא נמצאו קישורים לדף זה'), findsNothing);
   });
 
   // ── לשונית קישורים ──────────────────────────────────────────────────────

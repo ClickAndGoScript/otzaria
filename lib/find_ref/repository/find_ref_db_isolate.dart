@@ -3,6 +3,7 @@ import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:otzaria/core/error_log_file.dart';
+import 'package:otzaria/data/cache/acronym_cache_data.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/find_ref/repository/alt_toc_flat_entry.dart';
 import 'package:otzaria/migration/database/daos/database.dart';
@@ -245,6 +246,19 @@ class FindRefDbIsolate {
   Future<List<Map<String, dynamic>>> getAllLocalBooksSlim() async {
     final res = await _request('allLocalBooksSlim', const {});
     return _castRows(res);
+  }
+
+  /// שולף ומכין את קאש הכינויים כולו ב-worker, בלי לממש עשרות אלפי שורות
+  /// SQLite על ה-UI isolate.
+  Future<AcronymCacheData> getBookAcronymCache() async {
+    final raw = (await _request('bookAcronymCache', const {}) as Map)
+        .cast<String, Object?>();
+    return AcronymCacheData(
+      acronymsByBookId: (raw['acronymsByBookId'] as Map)
+          .cast<int, List<String>>(),
+      bookIdsByBigram: (raw['bookIdsByBigram'] as Map).cast<int, Int32List>(),
+      rowCount: raw['rowCount'] as int,
+    );
   }
 
   /// שורות ה-TOC של ספר מ-`seforim.db`. המיפוי ל-`TocEntry` נעשה בצד הקורא
@@ -539,6 +553,28 @@ void _workerMain(_Bootstrap bootstrap) {
           throw StateError('seforim.db unavailable for allLocalBooksSlim');
         }
         return repo.database.bookDao.selectAllLocalBooksSlim();
+      case 'bookAcronymCache':
+        final repo = await ensureRepo();
+        if (repo == null) {
+          throw StateError('seforim.db unavailable for bookAcronymCache');
+        }
+        final db = await repo.database.database;
+        final rows = db.select(
+          'SELECT bookId, term FROM book_acronym ORDER BY bookId',
+        );
+        final data = buildAcronymCacheData(
+          rows.map(
+            (row) => (
+              row['bookId'] as int,
+              (row['term'] as String?) ?? '',
+            ),
+          ),
+        );
+        return {
+          'acronymsByBookId': data.acronymsByBookId,
+          'bookIdsByBigram': data.bookIdsByBigram,
+          'rowCount': data.rowCount,
+        };
       case 'bookToc':
         final repo = await ensureRepo();
         if (repo == null) {
