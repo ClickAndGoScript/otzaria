@@ -3357,62 +3357,59 @@ class DatabaseLibraryProvider implements LibraryProvider {
             .toSet()
             .toList()
           ?..sort();
+    // כשל או מסד סגור זורקים ולא מחזירים ריק: הקורא שומר תוצאה ריקה כחלון
+    // "מכוסה" ולא ינסה שוב, והמפרשים נעלמים עד גלילה רחוקה.
     if (!_sqliteProvider.isInitialized || _sqliteProvider.repository == null) {
-      return [];
+      throw StateError('seforim.db אינו פתוח — קישורי "$title" לא נטענו');
     }
 
     // ראה הערה ב-_runAlternativeStructuresInIsolate.
     final dbPath = _sqliteProvider.dbPath;
 
-    try {
-      final result = await _runBookLinksInRangeInIsolate(
-        dbPath: dbPath,
-        title: title,
-        categoryId: categoryId,
-        fileType: fileType,
-        startLineIndex: startLineIndex,
-        endLineIndex: endLineIndex,
-        targetBookTitles: normalizedTargetBookTitles,
+    final result = await _runBookLinksInRangeInIsolate(
+      dbPath: dbPath,
+      title: title,
+      categoryId: categoryId,
+      fileType: fileType,
+      startLineIndex: startLineIndex,
+      endLineIndex: endLineIndex,
+      targetBookTitles: normalizedTargetBookTitles,
+    );
+
+    final links = result.map((row) {
+      final targetTitle = row['targetBookTitle'] as String;
+      final targetLineHeRef = row['targetLineHeRef'] as String?;
+      final connectionType =
+          row['connectionTypeName'] as String? ?? 'reference';
+
+      return Link(
+        heRef: targetLineHeRef?.trim().isNotEmpty == true
+            ? targetLineHeRef!.trim()
+            : targetTitle,
+        index1: (row['sourceLineIndex'] as int) + 1,
+        path2: targetTitle,
+        index2: (row['targetLineIndex'] as int) + 1,
+        connectionType: connectionType,
+        targetCategoryId: row['targetCategoryId'] as int?,
+        targetBookId: row['targetBookId'] as int?,
+        targetFileType: row['targetFileType'] as String?,
+        anchorStart: row['anchorCharStart'] as int?,
+        anchorEnd: row['anchorCharEnd'] as int?,
+        anchorLabel: row['anchorLabel'] as String?,
+        linkedAnchorStart: row['anchorLinkedCharStart'] as int?,
+        linkedAnchorEnd: row['anchorLinkedCharEnd'] as int?,
+        anchorSpans: _parseAnchorSpans(row['anchorSpans'] as String?),
+        heRefEnd:
+            (row['targetRangeEndHeRef'] as String?)?.trim().isNotEmpty == true
+            ? (row['targetRangeEndHeRef'] as String).trim()
+            : null,
+        index2End: row['targetRangeEndLineIndex'] != null
+            ? (row['targetRangeEndLineIndex'] as int) + 1
+            : null,
+        baseProvenance: row['baseProvenance'] as int? ?? 0,
       );
-
-      final links = result.map((row) {
-        final targetTitle = row['targetBookTitle'] as String;
-        final targetLineHeRef = row['targetLineHeRef'] as String?;
-        final connectionType =
-            row['connectionTypeName'] as String? ?? 'reference';
-
-        return Link(
-          heRef: targetLineHeRef?.trim().isNotEmpty == true
-              ? targetLineHeRef!.trim()
-              : targetTitle,
-          index1: (row['sourceLineIndex'] as int) + 1,
-          path2: targetTitle,
-          index2: (row['targetLineIndex'] as int) + 1,
-          connectionType: connectionType,
-          targetCategoryId: row['targetCategoryId'] as int?,
-          targetBookId: row['targetBookId'] as int?,
-          targetFileType: row['targetFileType'] as String?,
-          anchorStart: row['anchorCharStart'] as int?,
-          anchorEnd: row['anchorCharEnd'] as int?,
-          anchorLabel: row['anchorLabel'] as String?,
-          linkedAnchorStart: row['anchorLinkedCharStart'] as int?,
-          linkedAnchorEnd: row['anchorLinkedCharEnd'] as int?,
-          anchorSpans: _parseAnchorSpans(row['anchorSpans'] as String?),
-          heRefEnd:
-              (row['targetRangeEndHeRef'] as String?)?.trim().isNotEmpty == true
-              ? (row['targetRangeEndHeRef'] as String).trim()
-              : null,
-          index2End: row['targetRangeEndLineIndex'] != null
-              ? (row['targetRangeEndLineIndex'] as int) + 1
-              : null,
-          baseProvenance: row['baseProvenance'] as int? ?? 0,
-        );
-      }).toList();
-      return links;
-    } catch (e) {
-      debugPrint('⚠️ Error in getLinksForBookRange "$title": $e');
-      return [];
-    }
+    }).toList();
+    return links;
   }
 
   /// סיכום קישורי הספר לפי (ספר-יעד, סוג חיבור), בתוספת השורה הגבוהה ביותר

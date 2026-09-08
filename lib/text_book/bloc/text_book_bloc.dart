@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:otzaria/core/error_log_file.dart';
 import 'package:bloc_concurrency/bloc_concurrency.dart';
 import 'package:flutter/animation.dart';
 import 'package:flutter/scheduler.dart';
@@ -2839,17 +2840,22 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
           }
         }
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
       _isLoadingLinks = false;
       if (!isClosed) {
         add(const SetLinksLoading(false));
       }
-      if (kDebugMode) {
-        debugPrint(
-          '⚠️ TextBookBloc::loadLinks failed for ${book.title} '
-          '(window ${window.start}-${window.end}): $e',
+      try {
+        ErrorLogFile.append(
+          title: 'כשל בטעינת קישורי ספר',
+          error: e,
+          stackTrace: stackTrace,
+          details: {
+            'book': book.title,
+            'window': '${window.start}-${window.end}',
+          },
         );
-      }
+      } catch (_) {}
     }
   }
 

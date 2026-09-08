@@ -52,6 +52,25 @@ void main() {
       await Settings.init(cacheProvider: _MemoryCacheProvider());
     });
 
+    test(
+      'getLinksForBookRange זורק כשהמסד סגור — לא רשימה ריקה שנשמרת כחלון מכוסה '
+      '(issue #1216)',
+      () async {
+        final provider = DatabaseLibraryProvider.instance;
+        await provider.sqliteProvider.dispose();
+        await expectLater(
+          provider.getLinksForBookRange(
+            'ספר',
+            1,
+            'txt',
+            startLineIndex: 0,
+            endLineIndex: 10,
+          ),
+          throwsStateError,
+        );
+      },
+    );
+
     test('shouldIncludeBookByPath מסנן ספרי תלמוד בבלי כשהתיקייה חסרה', () {
       final filePath = path.join(
         '/library',
