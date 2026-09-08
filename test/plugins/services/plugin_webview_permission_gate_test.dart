@@ -82,12 +82,20 @@ void main() {
       );
     });
 
+    test('מניית הגופנים דורשת את ההרשאה שהמשתמש מאשר', () {
+      expect(
+        PluginWebViewPermissionGate.requiredPermissionFor(
+          PermissionResourceType.LOCAL_FONTS,
+        ),
+        pluginLocalFontsPermission,
+      );
+    });
+
     test('יכולת שאינה ממופה אינה נפתחת לתוספים', () {
       for (final resource in [
         PermissionResourceType.CAMERA,
         PermissionResourceType.MICROPHONE,
         PermissionResourceType.GEOLOCATION,
-        PermissionResourceType.LOCAL_FONTS,
         PermissionResourceType.FILE_READ_WRITE,
         PermissionResourceType.UNKNOWN,
       ]) {
@@ -116,6 +124,26 @@ void main() {
           grants: const {pluginClipboardReadPermission: true},
         ),
         PermissionResponseAction.GRANT,
+      );
+    });
+
+    test('מניית גופנים: הוצהר והוענק — מאושר, ובלי הצהרה — נדחה', () async {
+      final fonts = [PermissionResourceType.LOCAL_FONTS];
+      expect(
+        await _ask(
+          resources: fonts,
+          manifest: const [pluginLocalFontsPermission],
+          grants: const {pluginLocalFontsPermission: true},
+        ),
+        PermissionResponseAction.GRANT,
+      );
+      // הענקה לבדה אינה מספיקה: בלי הצהרה במניפסט אין למשתמש מה לאשר.
+      expect(
+        await _ask(
+          resources: fonts,
+          grants: const {pluginLocalFontsPermission: true},
+        ),
+        PermissionResponseAction.DENY,
       );
     });
 
