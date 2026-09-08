@@ -279,27 +279,29 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
       // ביטול לפני apply — לא שגיאה; _onCancel כבר העביר ל-idle.
     } catch (e, st) {
       if (_isStale(opId)) return;
-      _logUpdateError('applyDeltaPlan', e, st);
-      final partial = e is PartiallyAppliedLibraryDeltaException
-          ? e.appliedResult
-          : null;
+      final drift = e is LibraryDeltaContentDriftException ? e : null;
+      // סטייה אחרי commit כבר נרשמה ל-errors.txt על ידי הריפוזיטורי.
+      if (drift == null) _logUpdateError('applyDeltaPlan', e, st);
+      final partial = switch (e) {
+        PartiallyAppliedLibraryDeltaException(:final appliedResult) =>
+          appliedResult,
+        LibraryDeltaContentDriftException(:final appliedResult) =>
+          appliedResult,
+        _ => null,
+      };
       final applyError = e is PartiallyAppliedLibraryDeltaException
           ? e.cause
           : e;
-      // כל כשל apply (אי-התאמת hash, גרסה/סכמה לא תואמת, patch פגום) הופך
-      // את מסלול הדלתא ללא בטוח; הורדה מלאה עוקפת אותו. בלי זה, כשל שאינו
-      // אי-התאמת תוכן — למשל patch בסכמה חדשה מהנתמכת — משאיר את המשתמש
-      // בלולאת שגיאה ללא מוצא עד עדכון אפליקציה.
-      if (applyError is PatchApplyException) {
-        final String mismatchReason;
-        if (!applyError.isContentMismatch) {
-          mismatchReason = LibraryMessages.deltaApplyFailed;
-        } else if (applyError.hashMismatchStage ==
-            PatchHashMismatchStage.toContentHash) {
-          mismatchReason = LibraryMessages.deltaResultMismatch;
-        } else {
-          mismatchReason = LibraryMessages.localLibraryContentMismatch;
-        }
+      final requiresFullIndexRefresh =
+          drift != null || (partial?.requiresFullIndexRefresh ?? false);
+      // כל כשל apply (וגם סטייה שהתגלתה אחרי commit) מנותב להורדה מלאה — אחרת
+      // כשל שאינו אי-התאמת תוכן משאיר את המשתמש בלולאת שגיאה עד עדכון אפליקציה.
+      final mismatchReason = drift != null
+          ? LibraryMessages.libraryContentDriftAfterUpdate
+          : applyError is PatchApplyException
+          ? _applyMismatchReason(applyError)
+          : null;
+      if (mismatchReason != null) {
         final fallback = plan.toFullDownloadFallback(
           reason: mismatchReason,
         );
@@ -314,8 +316,7 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
               plan: fallback,
               hasUpdate: partial?.hasDatabaseChanges ?? false,
               changedBookIds: partial?.changedBookIds ?? const {},
-              requiresFullIndexRefresh:
-                  partial?.requiresFullIndexRefresh ?? false,
+              requiresFullIndexRefresh: requiresFullIndexRefresh,
             ),
           );
           return;
@@ -327,13 +328,20 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
           message: 'שגיאה בהחלת העדכון',
           hasUpdate: partial?.hasDatabaseChanges ?? false,
           changedBookIds: partial?.changedBookIds ?? const {},
-          requiresFullIndexRefresh: partial?.requiresFullIndexRefresh ?? false,
+          requiresFullIndexRefresh: requiresFullIndexRefresh,
           errorMessage: applyError.toString(),
         ),
       );
     } finally {
       _deltaWriteStarted = false;
     }
+  }
+
+  String _applyMismatchReason(PatchApplyException error) {
+    if (!error.isContentMismatch) return LibraryMessages.deltaApplyFailed;
+    return error.hashMismatchStage == PatchHashMismatchStage.toContentHash
+        ? LibraryMessages.deltaResultMismatch
+        : LibraryMessages.localLibraryContentMismatch;
   }
 
   Future<void> _onConfirmFull(
@@ -568,6 +576,7 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
     'upserts' => 'מוסיף ומעדכן רשומות',
     'deletes' => 'מסיר רשומות שהוסרו',
     'verifyToHash' => 'מאמת את הספרייה המעודכנת',
+    'verifyDeferred' => 'בודק את שאר הספרייה (ניתן להמשיך לקרוא)',
     'commit' => 'שומר שינויים',
     _ => 'מחיל עדכון',
   };
