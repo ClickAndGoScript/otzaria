@@ -1,3 +1,4 @@
+import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/foundation.dart';
 import 'package:otzaria/library_update/bloc/library_update_bloc.dart';
 import 'package:otzaria/work_status/work_status_item.dart';
@@ -17,7 +18,32 @@ const kCheckFailureAutoDismiss = Duration(seconds: 8);
 WorkStatusItem? libraryUpdateWorkStatusItem(
   LibraryUpdateState state, {
   required VoidCallback onRetry,
+  required VoidCallback onChooseDelta,
+  required VoidCallback onChooseFullDownload,
 }) {
+  // שתי אפשרויות שקולות — אין המלצה: הבחירה תלויה במהירות הרשת של המשתמש.
+  if (state.status == LibraryUpdateStatus.needsRouteChoice) {
+    return WorkStatusItem(
+      id: kLibraryUpdateWorkStatusId,
+      title: 'עדכון ספרייה',
+      message: state.message,
+      detail: 'בחר כיצד לעדכן',
+      kind: WorkStatusKind.awaitingInput,
+      actions: [
+        WorkStatusAction(
+          label: 'עדכון דלתא',
+          icon: FluentIcons.arrow_download_24_regular,
+          onPressed: onChooseDelta,
+        ),
+        WorkStatusAction(
+          label: 'הורדה מלאה',
+          icon: FluentIcons.database_24_regular,
+          onPressed: onChooseFullDownload,
+        ),
+      ],
+    );
+  }
+
   if (state.isBusy && state.status != LibraryUpdateStatus.checking) {
     return WorkStatusItem(
       id: kLibraryUpdateWorkStatusId,

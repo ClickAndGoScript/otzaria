@@ -1,7 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
-enum WorkStatusKind { running, failed, cancelled }
+/// [awaitingInput] — אין עבודה רצה, הפריט מחכה להחלטת המשתמש (בלי טבעת התקדמות).
+enum WorkStatusKind { running, failed, cancelled, awaitingInput }
 
 /// לחצן פעולה בשורת הפעולות של פריט חיווי; [emphasized] מציג אותו כלחוץ
 /// (tonal) — למצב פעיל של פעולת toggle.

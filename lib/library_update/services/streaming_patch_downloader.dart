@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:convert/convert.dart';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:seforim_library_updater/seforim_library_updater.dart';
@@ -10,6 +11,12 @@ import 'package:otzaria/utils/file/zstd_stream_extractor.dart';
 /// פונקציית חילוץ `.zst` מקובץ לקובץ בזרימה (ללא טעינה ל-RAM).
 typedef StreamingZstdExtractor =
     Future<void> Function(String archivePath, String outputPath);
+
+/// שם הקובץ המחולץ מארכיון patch — זהה למימוש הבסיסי: הסרת סיומת `.zst`.
+String extractedPatchFileName(String archiveFileName) =>
+    archiveFileName.endsWith('.zst')
+    ? archiveFileName.substring(0, archiveFileName.length - 4)
+    : '$archiveFileName.db';
 
 /// [PatchDownloader] שמוריד ומחלץ קובצי patch **בזרימה לדיסק**, במקום דרך
 /// הזיכרון.
@@ -35,22 +42,61 @@ class StreamingPatchDownloader extends PatchDownloader {
 
   final StreamingZstdExtractor _extractor;
 
+  /// מחזיר נתיב של patch מחולץ רק לאחר אימות גודל ו-sha256.
+  Future<String?> findReusableExtracted({
+    required PatchFileEntry patchFile,
+    required Directory destDir,
+    void Function(int bytesDone, int bytesTotal)? onVerifyProgress,
+    bool Function()? isCancelled,
+  }) async {
+    final extractedPath = p.join(
+      destDir.path,
+      extractedPatchFileName(patchFile.file),
+    );
+    final reusable = await _reuseExtracted(
+      patchFile,
+      extractedPath,
+      onVerifyProgress: onVerifyProgress,
+      isCancelled: isCancelled,
+    );
+    if (!reusable) return null;
+    final compressedPath = p.join(destDir.path, patchFile.file);
+    _deleteQuietly(compressedPath);
+    _deleteQuietly(PatchDownloader.resumeSidecarPath(compressedPath));
+    return extractedPath;
+  }
+
   @override
   Future<String> downloadAndExtract({
     required PatchFileEntry patchFile,
     required String downloadUrl,
     required Directory destDir,
     void Function(int downloaded, int? total)? onProgress,
+    void Function(int bytesDone, int bytesTotal)? onVerifyProgress,
     bool Function()? isCancelled,
   }) async {
     if (!destDir.existsSync()) destDir.createSync(recursive: true);
 
     final compressedPath = p.join(destDir.path, patchFile.file);
-    // שם הקובץ המחולץ — זהה למימוש הבסיסי: הסרת סיומת .zst
-    final extractedName = patchFile.file.endsWith('.zst')
-        ? patchFile.file.substring(0, patchFile.file.length - 4)
-        : '${patchFile.file}.db';
-    final extractedPath = p.join(destDir.path, extractedName);
+    final extractedPath = p.join(
+      destDir.path,
+      extractedPatchFileName(patchFile.file),
+    );
+
+    // patch מחולץ ומאומת שנשאר מריצה שנקטעה באמצע ה-apply — שימוש חוזר בו
+    // חוסך הורדה של מאות MB וחילוץ של כמה GB.
+    final reused = await _reuseExtracted(
+      patchFile,
+      extractedPath,
+      onVerifyProgress: onVerifyProgress,
+      isCancelled: isCancelled,
+    );
+    if (reused) {
+      onProgress?.call(patchFile.size, patchFile.size);
+      _deleteQuietly(compressedPath);
+      _deleteQuietly(PatchDownloader.resumeSidecarPath(compressedPath));
+      return extractedPath;
+    }
 
     try {
       // ה-sha256 של הדחוס הוא זהות יציבה של הנכס — מאפשר המשך הורדה שנקטעה.
@@ -83,7 +129,11 @@ class StreamingPatchDownloader extends PatchDownloader {
         );
       }
 
-      final actualHash = await Isolate.run(() => _sha256OfFile(extractedPath));
+      final actualHash = await _sha256OfFile(
+        extractedPath,
+        onProgress: onVerifyProgress,
+        isCancelled: isCancelled,
+      );
       if (actualHash != patchFile.uncompressedSha256.toLowerCase()) {
         throw const PatchDownloadException('sha256 של הקובץ המחולץ אינו תואם');
       }
@@ -104,6 +154,28 @@ class StreamingPatchDownloader extends PatchDownloader {
     }
   }
 
+  /// האם [extractedPath] הוא בדיוק ה-patch המצופה. אינו תואם — נמחק.
+  /// ביטול באמצע האימות משאיר את הקובץ — ייבדק שוב בריצה הבאה.
+  static Future<bool> _reuseExtracted(
+    PatchFileEntry patchFile,
+    String extractedPath, {
+    void Function(int bytesDone, int bytesTotal)? onVerifyProgress,
+    bool Function()? isCancelled,
+  }) async {
+    final extracted = File(extractedPath);
+    if (!extracted.existsSync()) return false;
+    if (extracted.lengthSync() == patchFile.uncompressedSize) {
+      final hash = await _sha256OfFile(
+        extractedPath,
+        onProgress: onVerifyProgress,
+        isCancelled: isCancelled,
+      );
+      if (hash == patchFile.uncompressedSha256.toLowerCase()) return true;
+    }
+    _deleteQuietly(extractedPath);
+    return false;
+  }
+
   static void _deleteQuietly(String path) {
     try {
       final file = File(path);
@@ -112,8 +184,71 @@ class StreamingPatchDownloader extends PatchDownloader {
   }
 }
 
+/// כל כמה בייטים ה-isolate מדווח התקדמות ובודק אם התבקש ביטול.
+const int _kVerifyReportEvery = 8 << 20;
+
 /// sha256 של קובץ בזרימה — רץ ב-isolate כדי לא לחסום את ה-UI על קבצים גדולים.
-Future<String> _sha256OfFile(String path) async {
-  final digest = await sha256.bind(File(path).openRead()).first;
-  return digest.toString();
+/// [onProgress] מקבל (בייטים שנקראו, גודל הקובץ); ביטול זורק
+/// [PatchDownloadCancelled] בתוך שניות גם על קובץ של כמה GB.
+Future<String> _sha256OfFile(
+  String path, {
+  void Function(int bytesDone, int bytesTotal)? onProgress,
+  bool Function()? isCancelled,
+}) async {
+  final total = File(path).lengthSync();
+  onProgress?.call(0, total);
+  final progressPort = ReceivePort();
+  SendPort? cancelPort;
+  final sub = progressPort.listen((msg) {
+    if (msg is SendPort) {
+      cancelPort = msg;
+      return;
+    }
+    final done = msg as int;
+    onProgress?.call(done, total);
+    if (isCancelled != null && isCancelled()) cancelPort?.send(null);
+  });
+  // הסגור נשלח ל-isolate — מותר לו להחזיק SendPort בלבד, לא את ה-ReceivePort.
+  final progressSink = progressPort.sendPort;
+  try {
+    final hash = await Isolate.run(() => _hashWorker(path, progressSink));
+    // קובץ קטן מסתיים לפני דיווח הביניים הראשון — הביטול נבדק גם בסיום.
+    if (hash == null || (isCancelled != null && isCancelled())) {
+      throw const PatchDownloadCancelled();
+    }
+    onProgress?.call(total, total);
+    return hash;
+  } finally {
+    await sub.cancel();
+    progressPort.close();
+  }
+}
+
+/// גוף ה-isolate: מחשב sha256, מדווח כל [_kVerifyReportEvery] בייטים, ועוצר
+/// (מחזיר null) כשמגיעה הודעת ביטול על ה-port שהוא שולח בתחילה.
+Future<String?> _hashWorker(String path, SendPort progress) async {
+  final cancelPort = ReceivePort();
+  var cancelled = false;
+  cancelPort.listen((_) => cancelled = true);
+  progress.send(cancelPort.sendPort);
+  try {
+    final digestSink = AccumulatorSink<Digest>();
+    final input = sha256.startChunkedConversion(digestSink);
+    var done = 0;
+    var sinceReport = 0;
+    await for (final chunk in File(path).openRead()) {
+      if (cancelled) return null;
+      input.add(chunk);
+      done += chunk.length;
+      sinceReport += chunk.length;
+      if (sinceReport >= _kVerifyReportEvery) {
+        sinceReport = 0;
+        progress.send(done);
+      }
+    }
+    input.close();
+    return digestSink.events.single.toString();
+  } finally {
+    cancelPort.close();
+  }
 }

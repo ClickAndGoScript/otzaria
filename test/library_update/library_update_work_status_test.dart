@@ -5,8 +5,17 @@ import 'package:otzaria/library_update/library_update_work_status.dart';
 import 'package:otzaria/work_status/work_status_item.dart';
 
 void main() {
-  WorkStatusItem? item(LibraryUpdateState state, {VoidCallback? onRetry}) =>
-      libraryUpdateWorkStatusItem(state, onRetry: onRetry ?? () {});
+  WorkStatusItem? item(
+    LibraryUpdateState state, {
+    VoidCallback? onRetry,
+    VoidCallback? onChooseDelta,
+    VoidCallback? onChooseFullDownload,
+  }) => libraryUpdateWorkStatusItem(
+    state,
+    onRetry: onRetry ?? () {},
+    onChooseDelta: onChooseDelta ?? () {},
+    onChooseFullDownload: onChooseFullDownload ?? () {},
+  );
 
   group('libraryUpdateWorkStatusItem', () {
     test('מנותק אינו יוצר פריט חיווי כלל — זו הרגרסיה שהתלוננו עליה', () {
@@ -165,6 +174,39 @@ void main() {
           reason: '$status',
         );
       }
+    });
+
+    test('בחירת מסלול מציגה את שתי האפשרויות כשוות ערך', () {
+      var delta = 0;
+      var full = 0;
+      final result = item(
+        const LibraryUpdateState(
+          status: LibraryUpdateStatus.needsRouteChoice,
+          message: 'עדכון דלתא: ... הורדה מלאה: ...',
+        ),
+        onChooseDelta: () => delta++,
+        onChooseFullDownload: () => full++,
+      )!;
+
+      expect(result.actions, hasLength(2));
+      expect(result.actions.map((a) => a.label), ['עדכון דלתא', 'הורדה מלאה']);
+      expect(
+        result.kind,
+        WorkStatusKind.awaitingInput,
+        reason: 'טבעת 0% נראית כמו עבודה שנתקעה — כאן אין עבודה, יש שאלה',
+      );
+      expect(result.progress, isNull);
+      expect(
+        result.actions.every((a) => !a.emphasized),
+        isTrue,
+        reason: 'אין המלצה — הבחירה תלויה במהירות הרשת של המשתמש',
+      );
+      expect(result.message, 'עדכון דלתא: ... הורדה מלאה: ...');
+
+      result.actions[0].onPressed();
+      result.actions[1].onPressed();
+      expect(delta, 1);
+      expect(full, 1);
     });
 
     test('התקדמות ההורדה מחושבת מהבתים, ונחתכת לטווח חוקי', () {

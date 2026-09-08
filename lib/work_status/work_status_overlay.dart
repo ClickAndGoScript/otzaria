@@ -133,6 +133,12 @@ class _PrimaryItemRow extends StatelessWidget {
                     size: 44,
                     color: colorScheme.error,
                   )
+                : item.kind == WorkStatusKind.awaitingInput
+                ? Icon(
+                    FluentIcons.question_circle_24_regular,
+                    size: 44,
+                    color: colorScheme.primary,
+                  )
                 : Stack(
                     alignment: Alignment.center,
                     children: [
@@ -252,6 +258,12 @@ class _SecondaryItemRow extends StatelessWidget {
                       FluentIcons.error_circle_24_regular,
                       size: 18,
                       color: colorScheme.error,
+                    )
+                  : item.kind == WorkStatusKind.awaitingInput
+                  ? Icon(
+                      FluentIcons.question_circle_24_regular,
+                      size: 18,
+                      color: colorScheme.primary,
                     )
                   : CircularProgressIndicator(
                       value: progress,

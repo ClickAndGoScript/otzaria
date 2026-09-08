@@ -52,6 +52,94 @@ void main() {
     );
   }
 
+  // כל הגעה לרשת בבדיקות השימוש-החוזר היא כשל הבדיקה עצמה.
+  StreamingPatchDownloader buildNoNetwork() {
+    extractorCalls = 0;
+    return StreamingPatchDownloader(
+      httpClient: MockClient.streaming(
+        (request, bodyStream) async => throw StateError('אסור להוריד'),
+      ),
+      extractor: reversingExtractor,
+    );
+  }
+
+  test('מחולץ מאומת שנשאר בקאש → שימוש חוזר בלי הורדה', () async {
+    final extractedPath = p.join(tmp.path, 'patch-v1-v2.db');
+    File(extractedPath).writeAsBytesSync(uncompressed, flush: true);
+    final leftoverArchive = File(p.join(tmp.path, 'patch-v1-v2.db.zst'))
+      ..writeAsBytesSync(compressed, flush: true);
+    final progress = <(int, int?)>[];
+
+    final path = await buildNoNetwork().downloadAndExtract(
+      patchFile: entry(),
+      downloadUrl: 'https://x/patch-v1-v2.db.zst',
+      destDir: tmp,
+      onProgress: (d, t) => progress.add((d, t)),
+    );
+
+    expect(path, extractedPath);
+    expect(extractorCalls, 0);
+    expect(progress.last, (compressed.length, compressed.length));
+    expect(leftoverArchive.existsSync(), isFalse);
+  });
+
+  test('אימות המחולץ מדווח התקדמות בבייטים, מ-0 ועד גודל הקובץ', () async {
+    final extractedPath = p.join(tmp.path, 'patch-v1-v2.db');
+    File(extractedPath).writeAsBytesSync(uncompressed, flush: true);
+    final verify = <(int, int)>[];
+
+    await buildNoNetwork().downloadAndExtract(
+      patchFile: entry(),
+      downloadUrl: 'https://x/patch-v1-v2.db.zst',
+      destDir: tmp,
+      onVerifyProgress: (d, t) => verify.add((d, t)),
+    );
+
+    expect(verify.first, (0, uncompressed.length));
+    expect(verify.last, (uncompressed.length, uncompressed.length));
+    expect(verify.every((e) => e.$2 == uncompressed.length), isTrue);
+  });
+
+  test(
+    'ביטול באמצע אימות המחולץ → PatchDownloadCancelled, הקובץ נשאר',
+    () async {
+      final extractedPath = p.join(tmp.path, 'patch-v1-v2.db');
+      File(extractedPath).writeAsBytesSync(uncompressed, flush: true);
+      var cancelled = false;
+
+      await expectLater(
+        buildNoNetwork().downloadAndExtract(
+          patchFile: entry(),
+          downloadUrl: 'https://x/patch-v1-v2.db.zst',
+          destDir: tmp,
+          onVerifyProgress: (d, t) => cancelled = true,
+          isCancelled: () => cancelled,
+        ),
+        throwsA(isA<PatchDownloadCancelled>()),
+      );
+      // הקובץ תקין — נמחק רק כשהאימות נכשל, לא כשהופסק.
+      expect(File(extractedPath).existsSync(), isTrue);
+    },
+  );
+
+  test('מחולץ בגודל תואם אך hash שגוי → נמחק ומורידים מחדש', () async {
+    final extractedPath = p.join(tmp.path, 'patch-v1-v2.db');
+    File(extractedPath).writeAsBytesSync(
+      Uint8List(uncompressed.length), // אותו גודל, תוכן אחר
+      flush: true,
+    );
+
+    final path = await build().downloadAndExtract(
+      patchFile: entry(),
+      downloadUrl: 'https://x/patch-v1-v2.db.zst',
+      destDir: tmp,
+    );
+
+    expect(path, extractedPath);
+    expect(extractorCalls, 1);
+    expect(File(path).readAsBytesSync(), uncompressed);
+  });
+
   test('הורדה לדיסק + חילוץ זורם → .db מאומת, הדחוס נמחק', () async {
     final path = await build().downloadAndExtract(
       patchFile: entry(),

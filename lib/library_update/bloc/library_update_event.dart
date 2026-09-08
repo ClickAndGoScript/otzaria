@@ -17,6 +17,11 @@ class ConfirmFullDownload extends LibraryUpdateEvent {
   const ConfirmFullDownload();
 }
 
+/// המשתמש בחר במסלול הדלתא למרות שהחלתו צפויה להימשך זמן רב.
+class ConfirmHeavyDelta extends LibraryUpdateEvent {
+  const ConfirmHeavyDelta();
+}
+
 /// המשתמש בחר לדחות הורדה מלאה ולהישאר עם הגרסה הנוכחית.
 class DeclineFullDownload extends LibraryUpdateEvent {
   const DeclineFullDownload();

@@ -22,6 +22,9 @@ enum LibraryUpdateStatus {
   /// נדרש אישור משתמש להורדה מלאה גדולה.
   needsFullConfirmation,
 
+  /// מסלול הדלתא זמין אך החלתו ארוכה מאוד — המשתמש בוחר בינו לבין הורדה מלאה.
+  needsRouteChoice,
+
   /// מצב חסום שדורש פעולה ידנית.
   blocked,
 
@@ -48,7 +51,8 @@ class LibraryUpdateState extends Equatable {
   /// יחס התקדמות (0..1) בתוך שלב אימות ה-hash; null בשאר שלבי ה-apply.
   final double? applyProgress;
 
-  /// התוכנית שנבחרה — זמינה במצב [LibraryUpdateStatus.needsFullConfirmation].
+  /// התוכנית שנבחרה — זמינה במצבי [LibraryUpdateStatus.needsFullConfirmation]
+  /// ו-[LibraryUpdateStatus.needsRouteChoice].
   final LibraryUpdatePlan? plan;
 
   /// מזהי ספרים (seforim.db) שתוכנם השתנה בעדכון דלתא — לרענון אינדקס החיפוש.
