@@ -53,18 +53,15 @@ class LibraryUpdateProgress {
   });
 }
 
-typedef LibraryUpdateProgressCallback = void Function(
-  LibraryUpdateProgress progress,
-);
+typedef LibraryUpdateProgressCallback =
+    void Function(LibraryUpdateProgress progress);
 
 /// נורה סינכרונית ברגע שבו ה-DB המלא החדש כבר החליף את הישן ואין עוד נקודת
 /// ביטול בטוחה. המאזין חייב לבצע עבודה סינכרונית וקלה בלבד.
 typedef FullDbReplacedCallback = void Function();
 
-typedef FullDbExtractor = Future<void> Function(
-  String archivePath,
-  String outputPath,
-);
+typedef FullDbExtractor =
+    Future<void> Function(String archivePath, String outputPath);
 
 /// אין מספיק מקום פנוי בדיסק לעדכון (הורדה מלאה או צעד דלתא) — נבדק לפני
 /// תחילת ההורדה.
@@ -284,12 +281,32 @@ class LibraryUpdateRepository implements LibraryUpdateService {
           throw StateError('חסר URL להורדת ${patchFile.file}');
         }
 
-        // נבדק לכל צעד בנפרד ולא פעם אחת לכל התוכנית: ה-patch של כל צעד נמחק
-        // בסיום ההחלה שלו, ולכן שיא הצרכן הוא צעד בודד.
+        final reusablePatchPath = downloader is StreamingPatchDownloader
+            ? await (downloader as StreamingPatchDownloader)
+                  .findReusableExtracted(
+                    patchFile: patchFile,
+                    destDir: cacheDir,
+                    isCancelled: isCancelled,
+                    onVerifyProgress: (done, total) => onProgress?.call(
+                      LibraryUpdateProgress(
+                        phase: LibraryUpdatePhase.verifying,
+                        stepIndex: i,
+                        totalSteps: steps.length,
+                        applyProgress: total > 0
+                            ? (done / total).clamp(0.0, 1.0)
+                            : null,
+                      ),
+                    ),
+                  )
+            : null;
+
+        // נבדק לכל צעד בנפרד: ה-patch נמחק בסיום, ולכן שיא הצרכן
+        // הוא צעד בודד.
         await _ensureDiskSpaceForDeltaStep(
           cacheDir: cacheDir,
           patchFile: patchFile,
           dbDir: p.dirname(dbPath),
+          reusableExtracted: reusablePatchPath != null,
         );
 
         onProgress?.call(
@@ -299,30 +316,34 @@ class LibraryUpdateRepository implements LibraryUpdateService {
             totalSteps: steps.length,
           ),
         );
-        final patchPath = await downloader.downloadAndExtract(
-          patchFile: patchFile,
-          downloadUrl: url,
-          destDir: cacheDir,
-          isCancelled: isCancelled,
-          onProgress: (downloaded, total) => onProgress?.call(
-            LibraryUpdateProgress(
-              phase: LibraryUpdatePhase.downloading,
-              stepIndex: i,
-              totalSteps: steps.length,
-              bytesDownloaded: downloaded,
-              bytesTotal: total,
-            ),
-          ),
-          // אימות patch פרוס של כמה GB נמשך עשרות שניות — בלי מד הוא נראה קפוא.
-          onVerifyProgress: (done, total) => onProgress?.call(
-            LibraryUpdateProgress(
-              phase: LibraryUpdatePhase.verifying,
-              stepIndex: i,
-              totalSteps: steps.length,
-              applyProgress: total > 0 ? (done / total).clamp(0.0, 1.0) : null,
-            ),
-          ),
-        );
+        final patchPath =
+            reusablePatchPath ??
+            await downloader.downloadAndExtract(
+              patchFile: patchFile,
+              downloadUrl: url,
+              destDir: cacheDir,
+              isCancelled: isCancelled,
+              onProgress: (downloaded, total) => onProgress?.call(
+                LibraryUpdateProgress(
+                  phase: LibraryUpdatePhase.downloading,
+                  stepIndex: i,
+                  totalSteps: steps.length,
+                  bytesDownloaded: downloaded,
+                  bytesTotal: total,
+                ),
+              ),
+              // אימות patch פרוס של כמה GB נמשך עשרות שניות — בלי מד הוא נראה קפוא.
+              onVerifyProgress: (done, total) => onProgress?.call(
+                LibraryUpdateProgress(
+                  phase: LibraryUpdatePhase.verifying,
+                  stepIndex: i,
+                  totalSteps: steps.length,
+                  applyProgress: total > 0
+                      ? (done / total).clamp(0.0, 1.0)
+                      : null,
+                ),
+              ),
+            );
 
         try {
           // ביטול בדיוק אחרי החילוץ ולפני ההחלה — עוצרים לפני שנוגעים ב-DB.
@@ -550,20 +571,13 @@ class LibraryUpdateRepository implements LibraryUpdateService {
     required Directory cacheDir,
     required PatchFileEntry patchFile,
     required String dbDir,
+    required bool reusableExtracted,
   }) async {
     if (!cacheDir.existsSync()) cacheDir.createSync(recursive: true);
-    final extracted = File(
-      p.join(cacheDir.path, extractedPatchFileName(patchFile.file)),
-    );
-    // מחולץ בגודל הנכון ייבדק ב-hash ע"י ה-downloader וברוב המקרים ייעשה בו
-    // שימוש חוזר — אין צורך במקום להורדה ולחילוץ מחדש.
-    final reusable =
-        extracted.existsSync() &&
-        extracted.lengthSync() == patchFile.uncompressedSize;
     int cacheNeeded = 0;
-    if (!reusable) {
+    if (!reusableExtracted) {
       final partial = File(p.join(cacheDir.path, patchFile.file));
-      final resumed = partial.existsSync() ? partial.lengthSync() : 0;
+      final resumed = _resumablePatchBytes(partial, patchFile);
       cacheNeeded =
           (patchFile.size - resumed).clamp(0, patchFile.size) +
           patchFile.uncompressedSize;
@@ -598,6 +612,23 @@ class LibraryUpdateRepository implements LibraryUpdateService {
         'אין מספיק מקום פנוי להחלת עדכון הדלתא: נדרש ~${gb(walNeeded)}GB '
         'ליד הספרייה, פנוי ${gb(dbInfo.freeBytes)}GB',
       );
+    }
+  }
+
+  int _resumablePatchBytes(File partial, PatchFileEntry patchFile) {
+    try {
+      if (!partial.existsSync()) return 0;
+      final length = partial.lengthSync();
+      final sidecar = File(PatchDownloader.resumeSidecarPath(partial.path));
+      if (!sidecar.existsSync()) return 0;
+      final lines = sidecar.readAsStringSync().split('\n');
+      if (lines.first != patchFile.sha256) return 0;
+      if (length == patchFile.size) return length;
+      if (length <= 0 || length > patchFile.size || lines.length < 2) return 0;
+      final etag = lines[1].trim();
+      return etag.isNotEmpty && !etag.startsWith('W/') ? length : 0;
+    } catch (_) {
+      return 0;
     }
   }
 

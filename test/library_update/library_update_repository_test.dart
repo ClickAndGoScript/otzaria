@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:otzaria/core/app_paths.dart';
@@ -15,6 +16,7 @@ import 'package:otzaria/data/data_providers/database_library_provider.dart';
 import 'package:otzaria/data/data_providers/sqlite_data_provider.dart';
 import 'package:otzaria/library_update/repository/library_update_repository.dart';
 import 'package:otzaria/library_update/services/library_runtime_refresh_service.dart';
+import 'package:otzaria/library_update/services/streaming_patch_downloader.dart';
 import 'package:seforim_library_updater/seforim_library_updater.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/utils/file/disk_free_space.dart';
@@ -471,16 +473,20 @@ void main() {
 
     LibraryUpdateRepository repo(
       Future<DiskSpaceInfo> Function(String dirPath) diskSpaceProvider,
-      String dbPath,
-    ) {
+      String dbPath, {
+      PatchDownloader? downloader,
+    }) {
       return LibraryUpdateRepository(
         discovery: _unusedDiscovery(),
-        downloader: PatchDownloader(
-          httpClient: MockClient.streaming(
-            (request, bodyStream) async => throw Exception('download-started'),
-          ),
-          decompress: (b) async => b,
-        ),
+        downloader:
+            downloader ??
+            PatchDownloader(
+              httpClient: MockClient.streaming(
+                (request, bodyStream) async =>
+                    throw Exception('download-started'),
+              ),
+              decompress: (b) async => b,
+            ),
         refreshService: _NoopRefreshService(),
         dbPathProvider: () => dbPath,
         dataRootProvider: () async => tmp.path,
@@ -541,15 +547,152 @@ void main() {
       _writeDb(dbPath, version: 1, marker: 'old');
       final cacheDir = Directory(p.join(tmp.path, 'library_update_cache'))
         ..createSync(recursive: true);
-      File(p.join(cacheDir.path, 'patch.db')).writeAsBytesSync(
-        List<int>.filled(2000, 0),
-      );
+      final contents = List<int>.filled(2000, 0);
+      File(p.join(cacheDir.path, 'patch.db')).writeAsBytesSync(contents);
       final repository = repo(
         (_) async => const DiskSpaceInfo(volumeId: 'C:\\', freeBytes: 2500),
         dbPath,
+        downloader: StreamingPatchDownloader(
+          httpClient: MockClient.streaming(
+            (request, bodyStream) async => throw Exception('אסור להוריד'),
+          ),
+          extractor: (archive, output) async => fail('אסור לחלץ'),
+        ),
       );
 
       // בלי השימוש החוזר היו נדרשים 5000 בייטים ובדיקת המקום הייתה חוסמת.
+      await expectLater(
+        repository.applyDeltaPlan(
+          _deltaPlan(
+            size: 1000,
+            uncompressedSize: 2000,
+            uncompressedSha256: sha256.convert(contents).toString(),
+          ),
+        ),
+        throwsA(isNot(isA<LibraryUpdateDiskSpaceException>())),
+      );
+    });
+
+    test(
+      'patch מחולץ בגודל נכון אך hash שגוי אינו עוקף את בדיקת המקום',
+      () async {
+        final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+        _writeDb(dbPath, version: 1, marker: 'old');
+        final cacheDir = Directory(p.join(tmp.path, 'library_update_cache'))
+          ..createSync(recursive: true);
+        final extracted = File(p.join(cacheDir.path, 'patch.db'))
+          ..writeAsBytesSync(List<int>.filled(2000, 0));
+        final repository = repo(
+          (_) async => const DiskSpaceInfo(volumeId: 'C:\\', freeBytes: 2500),
+          dbPath,
+          downloader: StreamingPatchDownloader(
+            httpClient: MockClient.streaming(
+              (request, bodyStream) async => throw Exception('אסור להוריד'),
+            ),
+          ),
+        );
+
+        await expectLater(
+          repository.applyDeltaPlan(
+            _deltaPlan(
+              size: 1000,
+              uncompressedSize: 2000,
+              uncompressedSha256: sha256
+                  .convert(List<int>.filled(2000, 1))
+                  .toString(),
+            ),
+          ),
+          throwsA(isA<LibraryUpdateDiskSpaceException>()),
+        );
+        expect(extracted.existsSync(), isFalse);
+      },
+    );
+
+    test('partial דחוס בלי sidecar אינו מנוכה מדרישת המקום', () async {
+      final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+      _writeDb(dbPath, version: 1, marker: 'old');
+      final cacheDir = Directory(p.join(tmp.path, 'library_update_cache'))
+        ..createSync(recursive: true);
+      File(p.join(cacheDir.path, 'patch.db.zst')).writeAsBytesSync(
+        List<int>.filled(400, 0),
+      );
+      final repository = repo(
+        (_) async => const DiskSpaceInfo(volumeId: 'C:\\', freeBytes: 4800),
+        dbPath,
+      );
+
+      await expectLater(
+        repository.applyDeltaPlan(
+          _deltaPlan(size: 1000, uncompressedSize: 2000),
+        ),
+        throwsA(isA<LibraryUpdateDiskSpaceException>()),
+      );
+    });
+
+    test(
+      'partial דחוס עם sidecar מטוקן שגוי אינו מנוכה מדרישת המקום',
+      () async {
+        final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+        _writeDb(dbPath, version: 1, marker: 'old');
+        final cacheDir = Directory(p.join(tmp.path, 'library_update_cache'))
+          ..createSync(recursive: true);
+        final partial = File(p.join(cacheDir.path, 'patch.db.zst'))
+          ..writeAsBytesSync(List<int>.filled(400, 0));
+        File(PatchDownloader.resumeSidecarPath(partial.path)).writeAsStringSync(
+          'wrong-token\n"etag-v1"',
+        );
+        final repository = repo(
+          (_) async => const DiskSpaceInfo(volumeId: 'C:\\', freeBytes: 4800),
+          dbPath,
+        );
+
+        await expectLater(
+          repository.applyDeltaPlan(
+            _deltaPlan(size: 1000, uncompressedSize: 2000),
+          ),
+          throwsA(isA<LibraryUpdateDiskSpaceException>()),
+        );
+      },
+    );
+
+    test('partial דחוס בלי ETag חזק אינו מנוכה מדרישת המקום', () async {
+      final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+      _writeDb(dbPath, version: 1, marker: 'old');
+      final cacheDir = Directory(p.join(tmp.path, 'library_update_cache'))
+        ..createSync(recursive: true);
+      final partial = File(p.join(cacheDir.path, 'patch.db.zst'))
+        ..writeAsBytesSync(List<int>.filled(400, 0));
+      File(PatchDownloader.resumeSidecarPath(partial.path)).writeAsStringSync(
+        'aa\nW/"weak-etag"',
+      );
+      final repository = repo(
+        (_) async => const DiskSpaceInfo(volumeId: 'C:\\', freeBytes: 4800),
+        dbPath,
+      );
+
+      await expectLater(
+        repository.applyDeltaPlan(
+          _deltaPlan(size: 1000, uncompressedSize: 2000),
+        ),
+        throwsA(isA<LibraryUpdateDiskSpaceException>()),
+      );
+    });
+
+    test('partial דחוס עם token ו-ETag חזקים מנוכה מדרישת המקום', () async {
+      final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+      _writeDb(dbPath, version: 1, marker: 'old');
+      final cacheDir = Directory(p.join(tmp.path, 'library_update_cache'))
+        ..createSync(recursive: true);
+      final partial = File(p.join(cacheDir.path, 'patch.db.zst'))
+        ..writeAsBytesSync(List<int>.filled(400, 0));
+      File(PatchDownloader.resumeSidecarPath(partial.path)).writeAsStringSync(
+        'aa\n"etag-v1"',
+      );
+      final repository = repo(
+        (_) async => const DiskSpaceInfo(volumeId: 'C:\\', freeBytes: 4800),
+        dbPath,
+      );
+
       await expectLater(
         repository.applyDeltaPlan(
           _deltaPlan(size: 1000, uncompressedSize: 2000),
@@ -1662,6 +1805,7 @@ LibraryUpdatePlan _deltaPlan({
   String file = 'patch.db.zst',
   int size = 1,
   int uncompressedSize = 1,
+  String uncompressedSha256 = 'bb',
 }) {
   final manifest = DeltaManifest.fromJson({
     'fromVersion': 1,
@@ -1676,7 +1820,7 @@ LibraryUpdatePlan _deltaPlan({
         'compression': 'zstd',
         'sha256': 'aa',
         'size': size,
-        'uncompressedSha256': 'bb',
+        'uncompressedSha256': uncompressedSha256,
         'uncompressedSize': uncompressedSize,
       },
     ],

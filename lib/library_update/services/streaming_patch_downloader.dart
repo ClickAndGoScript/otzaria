@@ -42,6 +42,30 @@ class StreamingPatchDownloader extends PatchDownloader {
 
   final StreamingZstdExtractor _extractor;
 
+  /// מחזיר נתיב של patch מחולץ רק לאחר אימות גודל ו-sha256.
+  Future<String?> findReusableExtracted({
+    required PatchFileEntry patchFile,
+    required Directory destDir,
+    void Function(int bytesDone, int bytesTotal)? onVerifyProgress,
+    bool Function()? isCancelled,
+  }) async {
+    final extractedPath = p.join(
+      destDir.path,
+      extractedPatchFileName(patchFile.file),
+    );
+    final reusable = await _reuseExtracted(
+      patchFile,
+      extractedPath,
+      onVerifyProgress: onVerifyProgress,
+      isCancelled: isCancelled,
+    );
+    if (!reusable) return null;
+    final compressedPath = p.join(destDir.path, patchFile.file);
+    _deleteQuietly(compressedPath);
+    _deleteQuietly(PatchDownloader.resumeSidecarPath(compressedPath));
+    return extractedPath;
+  }
+
   @override
   Future<String> downloadAndExtract({
     required PatchFileEntry patchFile,
