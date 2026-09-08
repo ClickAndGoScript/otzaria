@@ -349,9 +349,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // irrelevant (the window is never shown at this size).
   Win32Window::Size size(240, 240);
   if (!window.Create(kMainWindowTitle, origin, size)) {
+    startup_watchdog::Stop();
+    splash::Close();
     if (mutex) CloseHandle(mutex);
+    ::CoUninitialize();
     return EXIT_FAILURE;
   }
+  startup_watchdog::RefreshModules();
   // ⚠️ `false` ולא `true`: עם ריבוי חלונות, סגירת החלון הראשי אינה
   // מסיימת את התהליך כל עוד חלונות אחרים פתוחים. `FlutterWindow::OnDestroy`
   // מפרסם `WM_QUIT` רק כשנסגר החלון האחרון.

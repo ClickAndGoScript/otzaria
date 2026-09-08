@@ -8,7 +8,13 @@ namespace startup_watchdog {
 // מתחיל את הניטור. יש לקרוא מה-thread הראשי לפני לולאת ההודעות.
 void Start();
 
-// עוצר את הניטור (בחשיפת החלון או ביציאה). בטוח לקריאה חוזרת.
+// מרענן את snapshot המודולים בנקודה בטוחה ב-thread הראשי.
+void RefreshModules();
+
+// מבקש עצירה בלי להמתין ל-watcher. יש לקרוא במסלול חשיפת החלון.
+void RequestStop();
+
+// משלים עצירה ושחרור משאבים ביציאה. בטוח לקריאה חוזרת.
 void Stop();
 
 }  // namespace startup_watchdog

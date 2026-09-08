@@ -806,8 +806,6 @@ void main() {
             .having((p) => p.phase, 'phase', LibraryUpdatePhase.verifying)
             .having((p) => p.stepIndex, 'stepIndex', 0)
             .having((p) => p.totalSteps, 'totalSteps', 1)
-            .having((p) => p.bytesDownloaded, 'bytesDownloaded', 64)
-            .having((p) => p.bytesTotal, 'bytesTotal', 128)
             .having((p) => p.applyProgress, 'applyProgress', 0.5),
       ),
     );
@@ -1668,9 +1666,9 @@ class _NoopRefreshService extends LibraryRuntimeRefreshService {
 }
 
 /// downloader עם http.Client אמיתי (IOClient לא-sendable), שמחזיר patch מקומי.
-class _LocalPatchDownloader extends StreamingPatchDownloader {
+class _LocalPatchDownloader extends PatchDownloader {
   _LocalPatchDownloader(this.patchPath, {this.verifyProgress})
-    : super(extractor: (_, _) async {});
+    : super(decompress: (b) async => b);
   final String patchPath;
   final (int, int)? verifyProgress;
 

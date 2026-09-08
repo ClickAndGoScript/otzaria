@@ -2158,14 +2158,20 @@ class _CommentaryPaneState extends State<_CommentaryPane> {
     if (endLine < start || _isAnchorRangeLoaded(start, endLine)) return;
     final requested = widget.commentatorName;
     final provider = LibraryProviderManager.instance.databaseProvider;
-    final links = await provider.getLinksForBookRange(
-      book.title,
-      categoryId,
-      'txt',
-      startLineIndex: start,
-      endLineIndex: endLine,
-      targetBookTitles: targets,
-    );
+    late final List<Link> links;
+    try {
+      links = await provider.getLinksForBookRange(
+        book.title,
+        categoryId,
+        'txt',
+        startLineIndex: start,
+        endLineIndex: endLine,
+        targetBookTitles: targets,
+      );
+    } catch (e, stackTrace) {
+      debugPrint('Failed to load commentary anchors: $e\n$stackTrace');
+      return;
+    }
     if (!mounted || widget.commentatorName != requested) return;
     _anchorLoadedRanges = TextBookBloc.mergeLoadedContentRanges(
       _anchorLoadedRanges,

@@ -1,5 +1,9 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/models/links.dart';
@@ -15,11 +19,13 @@ const _commentator = 'רש"י על ספר בדיקה';
 
 /// טעינת הקישורים נכשלת [failuresLeft] פעמים ואחר כך מחזירה קישור לכל שורה.
 class _Repository extends TextBookRepository {
-  _Repository({required this.failuresLeft})
+  _Repository({required this.failuresLeft, this.firstCallGate})
     : super(fileSystem: FileSystemData.instance);
 
   int failuresLeft;
   int linkCalls = 0;
+  final Completer<void>? firstCallGate;
+  final Completer<void> firstCallStarted = Completer<void>();
 
   @override
   Future<String> getBookContent(TextBook book) async =>
@@ -58,6 +64,10 @@ class _Repository extends TextBookRepository {
     Iterable<String>? targetBookTitles,
   }) async {
     linkCalls++;
+    if (linkCalls == 1) {
+      firstCallStarted.complete();
+      await firstCallGate?.future;
+    }
     await Future<void>.delayed(const Duration(milliseconds: 5));
     if (failuresLeft > 0) {
       failuresLeft--;
@@ -92,16 +102,31 @@ Future<TextBookLoaded> _waitFor(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  late Directory tempDataRoot;
 
   setUpAll(() async {
     await Settings.init(cacheProvider: MemoryCacheProvider());
+  });
+
+  setUp(() {
+    tempDataRoot = Directory.systemTemp.createTempSync('links-retry-test-');
+    AppPaths.debugOverrideDataRootPath(tempDataRoot.path);
+  });
+
+  tearDown(() {
+    AppPaths.debugOverrideDataRootPath(null);
+    if (tempDataRoot.existsSync()) tempDataRoot.deleteSync(recursive: true);
   });
 
   test(
     'כשל חולף בטעינת הקישורים אינו נשמר כחלון ריק — הלחיצה הבאה טוענת מחדש '
     '(issue #1216)',
     () async {
-      final repository = _Repository(failuresLeft: 1);
+      final firstCallGate = Completer<void>();
+      final repository = _Repository(
+        failuresLeft: 1,
+        firstCallGate: firstCallGate,
+      );
       final book = TextBook(title: 'ספר בדיקה', isUserBook: true);
       final bloc = TextBookBloc(
         repository: repository,
@@ -124,9 +149,12 @@ void main() {
         (s) => s.activeCommentators.isNotEmpty,
         reason: 'המפרשים לא נבחרו',
       );
+      await repository.firstCallStarted.future.timeout(
+        const Duration(seconds: 10),
+      );
+      firstCallGate.complete();
 
       // הטעינה הראשונה נכשלת: מצב "טוען" חייב להתאפס ולא להיתקע.
-      bloc.add(const UpdateVisibleIndecies([5, 6, 7]));
       await _waitFor(
         bloc,
         (s) => repository.failuresLeft == 0 && !s.linksLoading,
@@ -148,4 +176,43 @@ void main() {
       expect(recovered.linksLoading, isFalse);
     },
   );
+
+  test('בקשת force ממתינה נטענת פעם אחת אחרי כשל חופף', () async {
+    final firstCallGate = Completer<void>();
+    final repository = _Repository(
+      failuresLeft: 1,
+      firstCallGate: firstCallGate,
+    );
+    final book = TextBook(title: 'ספר חפיפה', isUserBook: true);
+    final bloc = TextBookBloc(
+      repository: repository,
+      initialState: TextBookInitial.named(book, 10, false, const []),
+      scrollController: ItemScrollController(),
+      positionsListener: ItemPositionsListener.create(),
+    );
+    addTearDown(bloc.close);
+
+    bloc.add(
+      const LoadContent(
+        fontSize: 20,
+        showSplitView: false,
+        removeNikud: false,
+        loadCommentators: false,
+      ),
+    );
+    await repository.firstCallStarted.future.timeout(
+      const Duration(seconds: 10),
+    );
+    bloc.add(const LoadAllLinksForIndices([12]));
+    firstCallGate.complete();
+
+    final recovered = await _waitFor(
+      bloc,
+      (s) => repository.linkCalls == 2 && s.linksByLine[13]?.isNotEmpty == true,
+      reason: 'בקשת ה-force הממתינה לא נטענה אחרי הכשל',
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(repository.linkCalls, 2);
+    expect(recovered.linksLoading, isFalse);
+  });
 }

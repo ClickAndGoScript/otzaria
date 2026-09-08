@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
-#include <mutex>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -40,8 +40,9 @@ UINT_PTR g_timer = 0;
 ULONGLONG g_start_tick = 0;
 std::thread g_watcher;
 
-std::mutex g_modules_mutex;
-std::vector<ModuleRange> g_modules;
+using ModuleSnapshot = std::vector<ModuleRange>;
+std::shared_ptr<const ModuleSnapshot> g_modules =
+    std::make_shared<const ModuleSnapshot>();
 
 void CALLBACK HeartbeatProc(HWND, UINT, UINT_PTR, DWORD) {
   g_last_beat.store(::GetTickCount64(), std::memory_order_relaxed);
@@ -54,26 +55,25 @@ std::string NarrowPathTail(const std::wstring& path) {
   const int len = ::WideCharToMultiByte(CP_UTF8, 0, tail.c_str(), -1, nullptr,
                                         0, nullptr, nullptr);
   if (len <= 1) return std::string();
-  std::string out(static_cast<size_t>(len - 1), '\0');
+  std::string out(static_cast<size_t>(len), '\0');
   ::WideCharToMultiByte(CP_UTF8, 0, tail.c_str(), -1, &out[0], len, nullptr,
                         nullptr);
+  out.resize(static_cast<size_t>(len - 1));
   return out;
 }
 
-// מרעננת את מפת המודולים. נקראת רק כשה-thread הראשי מגיב: הסריקה נוטלת את
-// נעילת ה-loader, ותקיעה בתוך LoadLibrary היא אחד החשודים.
-void RefreshModules() {
+std::shared_ptr<const ModuleSnapshot> BuildModuleSnapshot() {
   HMODULE handles[512];
   DWORD needed = 0;
   if (!::EnumProcessModules(::GetCurrentProcess(), handles, sizeof(handles),
                             &needed)) {
-    return;
+    return nullptr;
   }
   const size_t count =
       (std::min)(static_cast<size_t>(needed / sizeof(HMODULE)),
                  sizeof(handles) / sizeof(handles[0]));
-  std::vector<ModuleRange> fresh;
-  fresh.reserve(count);
+  auto fresh = std::make_shared<ModuleSnapshot>();
+  fresh->reserve(count);
   for (size_t i = 0; i < count; ++i) {
     MODULEINFO info = {};
     if (!::GetModuleInformation(::GetCurrentProcess(), handles[i], &info,
@@ -86,16 +86,16 @@ void RefreshModules() {
     range.base = reinterpret_cast<ULONG_PTR>(info.lpBaseOfDll);
     range.size = info.SizeOfImage;
     range.name = NarrowPathTail(path);
-    fresh.push_back(std::move(range));
+    fresh->push_back(std::move(range));
   }
-  std::lock_guard<std::mutex> lock(g_modules_mutex);
-  g_modules.swap(fresh);
+  return fresh;
 }
 
 std::string DescribeAddress(ULONG_PTR address) {
   char buffer[160];
-  std::lock_guard<std::mutex> lock(g_modules_mutex);
-  for (const ModuleRange& range : g_modules) {
+  const auto modules =
+      std::atomic_load_explicit(&g_modules, std::memory_order_acquire);
+  for (const ModuleRange& range : *modules) {
     if (address >= range.base && address < range.base + range.size) {
       snprintf(buffer, sizeof(buffer), "%s+0x%llx", range.name.c_str(),
                static_cast<unsigned long long>(address - range.base));
@@ -244,13 +244,15 @@ std::string Timestamp() {
 void ReportStall(int capture_index, ULONGLONG stalled_for_ms,
                  ULONGLONG since_launch_ms,
                  const std::vector<ULONG_PTR>& frames) {
-  std::string report = "\n=== Startup stall " + Timestamp() + " ===\n";
+  std::string report =
+      "\n=== Startup heartbeat delay " + Timestamp() + " ===\n";
 #ifdef FLUTTER_VERSION
   report += std::string("Version: ") + FLUTTER_VERSION + "\n";
 #endif
   char header[192];
   snprintf(header, sizeof(header),
-           "Main thread unresponsive for %llums, at %llums after launch "
+           "Message-loop timer delayed for %llums, at %llums after launch "
+           "(the thread may be blocked or WM_TIMER starved) "
            "(capture %d/%d)\n",
            static_cast<unsigned long long>(stalled_for_ms),
            static_cast<unsigned long long>(since_launch_ms), capture_index,
@@ -271,7 +273,6 @@ void ReportStall(int capture_index, ULONGLONG stalled_for_ms,
 void WatcherLoop() {
   int captures = 0;
   ULONGLONG last_capture = 0;
-  ULONGLONG last_refresh = 0;
 
   while (!g_stop.load(std::memory_order_relaxed)) {
     ::Sleep(kHeartbeatIntervalMs);
@@ -281,13 +282,7 @@ void WatcherLoop() {
     const ULONGLONG beat = g_last_beat.load(std::memory_order_relaxed);
     const ULONGLONG gap = now > beat ? now - beat : 0;
 
-    if (gap < kStallThresholdMs) {
-      if (now - last_refresh >= 2000) {
-        RefreshModules();
-        last_refresh = now;
-      }
-      continue;
-    }
+    if (gap < kStallThresholdMs) continue;
 
     if (captures >= kMaxCaptures) continue;
     if (last_capture != 0 && now - last_capture < kCaptureIntervalMs) continue;
@@ -306,6 +301,7 @@ void WatcherLoop() {
 
 void Start() {
   if (g_started.exchange(true)) return;
+  g_stop.store(false, std::memory_order_relaxed);
   g_start_tick = ::GetTickCount64();
   g_last_beat.store(g_start_tick, std::memory_order_relaxed);
 
@@ -319,21 +315,40 @@ void Start() {
 
   RefreshModules();
   g_timer = ::SetTimer(nullptr, 0, kHeartbeatIntervalMs, HeartbeatProc);
+  if (g_timer == 0) {
+    if (g_main_thread != nullptr) {
+      ::CloseHandle(g_main_thread);
+      g_main_thread = nullptr;
+    }
+    g_started.store(false, std::memory_order_relaxed);
+    return;
+  }
   g_watcher = std::thread(WatcherLoop);
 }
 
-void Stop() {
-  if (!g_started.load(std::memory_order_relaxed)) return;
-  if (g_stop.exchange(true)) return;
+void RefreshModules() {
+  const auto fresh = BuildModuleSnapshot();
+  if (fresh != nullptr) {
+    std::atomic_store_explicit(&g_modules, fresh, std::memory_order_release);
+  }
+}
+
+void RequestStop() {
+  g_stop.store(true, std::memory_order_relaxed);
   if (g_timer != 0) {
     ::KillTimer(nullptr, g_timer);
     g_timer = 0;
   }
+}
+
+void Stop() {
+  RequestStop();
   if (g_watcher.joinable()) g_watcher.join();
   if (g_main_thread != nullptr) {
     ::CloseHandle(g_main_thread);
     g_main_thread = nullptr;
   }
+  g_started.store(false, std::memory_order_relaxed);
 }
 
 }  // namespace startup_watchdog

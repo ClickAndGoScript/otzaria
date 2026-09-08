@@ -4019,11 +4019,17 @@ class _PdfBookScreenState extends State<PdfBookScreen>
     if (window == null) return;
 
     final requestId = ++_linksWindowRequestId;
-    final loaded = await _linksRepository.getBookLinksInRange(
-      textBook,
-      startIndex: window.startLine - 1,
-      endIndex: window.endLine - 1,
-    );
+    late final List<otz_links.Link> loaded;
+    try {
+      loaded = await _linksRepository.getBookLinksInRange(
+        textBook,
+        startIndex: window.startLine - 1,
+        endIndex: window.endLine - 1,
+      );
+    } catch (e, stackTrace) {
+      debugPrint('Failed to load PDF links window: $e\n$stackTrace');
+      return;
+    }
     if (!mounted ||
         requestId != _linksWindowRequestId ||
         widget.tab.linksAreComplete) {
